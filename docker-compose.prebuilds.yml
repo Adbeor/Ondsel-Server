@@ -4,7 +4,7 @@
 
 services:
   mongodb:
-    image: mongo:8.0.23
+    image: mongo:7
     ports:
       - "${EXPOSE_DB_PORT:-27018}:27017"
     volumes:
@@ -20,7 +20,7 @@ services:
       - DB_URL=mongodb://mongodb:27017/backend-db
       - FRONTEND_URL=${FRONTEND_URL:-http://localhost:3000}
       - VITE_APP_API_URL=${VITE_APP_API_URL:-http://localhost:3030/}
-      - FC_WORKER_URL=http://0.0.0.0:8080/2015-03-31/functions/function/invocations
+      - FC_WORKER_URL=http://127.0.0.1:8080/2015-03-31/functions/function/invocations
       - SMTP_HOST
       - SMTP_PORT=${SMTP_PORT:-465}
       - SMTP_USER
@@ -72,7 +72,7 @@ services:
     environment:
       - REDIS_HOST=fc-worker-redis
       - REDIS_PORT=6379
-      - BACKEND_URL=${BACKEND_URL:-http://localhost:3030}
+      - BACKEND_URL=http://127.0.0.1:3030
     # bubblewrap (RUN_CODE_SNIPPET sandbox) needs CAP_SYS_ADMIN + writable cgroup.
     privileged: true
     network_mode: "service:backend"

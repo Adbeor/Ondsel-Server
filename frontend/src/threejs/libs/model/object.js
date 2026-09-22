@@ -168,7 +168,7 @@ export class ModelObject3D
           this.object3d.visible = isVisible;
         }
       } else {
-        this.visibility = !this.GetVisibility();
+        this.visibility = isVisible === null ? !this.GetVisibility() : isVisible;
         this.GetAllChildren().forEach(object => object.ToggleVisibility(this.visibility));
       }
     }

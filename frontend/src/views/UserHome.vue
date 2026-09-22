@@ -10,8 +10,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       <span class="text-h6">User {{ userSum.name }}</span>
       <span v-if="promotionPossible" class="ms-2">
         <v-btn
-          color="decoration"
-          flat
+          variant="text"
           size="small"
           icon="mdi-bullhorn"
           @click.stop="openEditPromotionDialog()"

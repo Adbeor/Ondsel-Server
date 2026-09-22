@@ -27,6 +27,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         location="start"
       >Fit all or selection</v-tooltip>
     </v-btn>
+    <v-btn icon flat :color="isSectionActive ? 'primary' : undefined" :variant="isSectionActive ? 'tonal' : 'text'" @click="toggleSectionAnalysis">
+      <v-icon :color="isSectionActive ? 'primary' : 'on-surface'">mdi-vector-intersection</v-icon>
+      <v-tooltip
+        activator="parent"
+        location="start"
+      >Análisis de sección / Cortes 3D</v-tooltip>
+    </v-btn>
+    <v-btn icon flat :color="isMeasureActive ? 'primary' : undefined" :variant="isMeasureActive ? 'tonal' : 'text'" @click="toggleMeasurementTool">
+      <v-icon :color="isMeasureActive ? 'primary' : 'on-surface'">mdi-ruler-square</v-icon>
+      <v-tooltip
+        activator="parent"
+        location="start"
+      >Medición CAD (Planos, Radios, Líneas)</v-tooltip>
+    </v-btn>
     <v-btn icon flat @click="openAttributeViewer" v-if="sharedModel && (sharedModel.canViewModelAttributes || sharedModel.canUpdateModel)">
       <v-icon>mdi-view-list</v-icon>
       <v-tooltip
@@ -55,7 +69,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         location="start"
       >Share With User</v-tooltip>
     </v-btn>
-    <v-btn v-if="!hasBasicRights" icon color="decoration" flat>
+    <v-btn v-if="!hasBasicRights" icon disabled flat>
       <v-icon>mdi-account-network</v-icon>
       <v-tooltip
         activator="parent"
@@ -76,7 +90,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         location="start"
       >Should {{selfPronoun}} promote this shared link</v-tooltip>
     </v-btn>
-    <v-btn v-if="!hasBasicRights" icon flat color="decoration">
+    <v-btn v-if="!hasBasicRights" icon flat disabled>
       <v-icon>mdi-bullhorn</v-icon>
       <v-tooltip
         activator="parent"
@@ -95,15 +109,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       <v-icon>mdi-code-tags</v-icon>
       <v-tooltip activator="parent" location="start">Run script</v-tooltip>
     </v-btn>
-    <v-btn v-else-if="sharedModel && sharedModel.canRunScripts && isAuthenticated && !user?.constraint?.canRunScripts" icon flat color="decoration">
+    <v-btn v-else-if="sharedModel && sharedModel.canRunScripts && isAuthenticated && !user?.constraint?.canRunScripts" icon flat disabled>
       <v-icon>mdi-code-tags</v-icon>
       <v-tooltip activator="parent" location="start">Upgrade your plan to run scripts</v-tooltip>
     </v-btn>
-    <v-btn v-else-if="sharedModel && sharedModel.canRunScripts && !isAuthenticated" icon flat color="decoration">
+    <v-btn v-else-if="sharedModel && sharedModel.canRunScripts && !isAuthenticated" icon flat disabled>
       <v-icon>mdi-code-tags</v-icon>
       <v-tooltip activator="parent" location="start">Run script (must be logged in)</v-tooltip>
     </v-btn>
-    <v-btn v-else-if="sharedModel && !sharedModel.canRunScripts" icon flat color="decoration">
+    <v-btn v-else-if="sharedModel && !sharedModel.canRunScripts" icon flat disabled>
       <v-icon>mdi-code-tags</v-icon>
       <v-tooltip activator="parent" location="start">Share link does not allow running scripts</v-tooltip>
     </v-btn>
@@ -115,7 +129,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       >Open model in {{ siteConfig?.desktopApp?.name }} desktop app</v-tooltip>
     </v-btn>
   </v-navigation-drawer>
-  <ModelViewer ref="modelViewer" :full-screen="isWindowLoadedInIframe" @model:loaded="modelLoaded" @object:clicked="objectClicked"/>
+  <ModelViewer ref="modelViewer" :full-screen="isWindowLoadedInIframe" @model:loaded="modelLoaded" @object:clicked="objectClicked" @section:changed="val => isSectionActive = val" @measure:changed="val => isMeasureActive = val"/>
   <ObjectsListView v-if="!isWindowLoadedInIframe" ref="objectListView" @select-given-object="objectSelected" />
   <div class="text-center">
     <v-dialog
@@ -223,7 +237,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
   />
   <a :href="$route.path" v-if="isWindowLoadedInIframe" target="_blank">
     <v-sheet class="bottom-left-button d-flex flex-wrap" :height="50" :width="160" border>
-      <div class="text-h6 font-weight-bold pa-2 text-white">Explore on</div>
+      <div class="text-h6 font-weight-bold pa-2" style="color: rgb(var(--v-theme-on-surface));">Explore on</div>
       <v-img :src="siteConfig?.logoUrl" max-width="40" max-height="40" class="mt-1"></v-img>
     </v-sheet>
   </a>
@@ -307,6 +321,8 @@ export default {
     isAttributeViewerActive: false,
     isExportModelDialogActive: false,
     isReloadingOBJ: false,
+    isSectionActive: false,
+    isMeasureActive: false,
     error: '',
     isShareLinkDialogActive: false,
     isDrawerOpen: false,
@@ -387,6 +403,16 @@ export default {
     fitModelToScreen() {
       this.$refs.modelViewer.fitModelToScreen();
     },
+    toggleSectionAnalysis() {
+      if (this.$refs.modelViewer) {
+        this.$refs.modelViewer.toggleSection();
+      }
+    },
+    toggleMeasurementTool() {
+      if (this.$refs.modelViewer) {
+        this.$refs.modelViewer.toggleMeasurement();
+      }
+    },
     openAttributeViewer() {
       this.$refs.attributeViewer.$data.dialog = true;
     },
@@ -456,7 +482,10 @@ export default {
       this.isModelLoaded = true;
       this.viewer = viewer;
       if (this.$refs.objectListView) {
-        this.$refs.objectListView.$data.viewer= this.viewer;
+        this.$refs.objectListView.$data.viewer = this.viewer;
+        if (this.$refs.objectListView.setViewer) {
+          this.$refs.objectListView.setViewer(this.viewer);
+        }
       }
       setTimeout(() => this.uploadThumbnail(), 500);
     },

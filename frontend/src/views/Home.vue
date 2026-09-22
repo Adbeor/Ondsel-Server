@@ -27,6 +27,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         location="start"
       >Fit all or selection</v-tooltip>
     </v-btn>
+    <v-btn icon flat :color="isSectionActive ? 'primary' : undefined" :variant="isSectionActive ? 'tonal' : 'text'" @click="toggleSectionAnalysis">
+      <v-icon :color="isSectionActive ? 'primary' : 'on-surface'">mdi-vector-intersection</v-icon>
+      <v-tooltip
+        activator="parent"
+        location="start"
+      >Análisis de sección / Cortes 3D</v-tooltip>
+    </v-btn>
+    <v-btn icon flat :color="isMeasureActive ? 'primary' : undefined" :variant="isMeasureActive ? 'tonal' : 'text'" @click="toggleMeasurementTool">
+      <v-icon :color="isMeasureActive ? 'primary' : 'on-surface'">mdi-ruler-square</v-icon>
+      <v-tooltip
+        activator="parent"
+        location="start"
+      >Medición CAD (Planos, Radios, Líneas)</v-tooltip>
+    </v-btn>
     <v-btn icon flat @click="openAttributeViewer">
       <v-icon>mdi-view-list</v-icon>
       <v-tooltip
@@ -71,7 +85,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       >Open model in {{ siteConfig?.desktopApp?.name }} desktop app</v-tooltip>
     </v-btn> -->
   </v-navigation-drawer>
-  <ModelViewer ref="modelViewer" @model:loaded="modelLoaded" @object:clicked="objectClicked"/>
+  <ModelViewer ref="modelViewer" @model:loaded="modelLoaded" @object:clicked="objectClicked" @section:changed="val => isSectionActive = val" @measure:changed="val => isMeasureActive = val"/>
   <ObjectsListView ref="objectListView" :model="model" @select-given-object="objectSelected" />
   <div class="text-center">
     <v-dialog
@@ -292,6 +306,8 @@ export default {
     isShareModelDialogActive: false,
     isExportModelDialogActive: false,
     isReloadingOBJ: false,
+    isSectionActive: false,
+    isMeasureActive: false,
     error: '',
     manageSharedModelsDrawer: false,
     isDrawerOpen: false,
@@ -442,6 +458,16 @@ export default {
     fitModelToScreen() {
       this.$refs.modelViewer.fitModelToScreen();
     },
+    toggleSectionAnalysis() {
+      if (this.$refs.modelViewer) {
+        this.$refs.modelViewer.toggleSection();
+      }
+    },
+    toggleMeasurementTool() {
+      if (this.$refs.modelViewer) {
+        this.$refs.modelViewer.toggleMeasurement();
+      }
+    },
     openAttributeViewer() {
       this.$refs.attributeViewer.$data.dialog = true;
     },
@@ -553,7 +579,12 @@ export default {
       this.isModelLoaded = true;
       this.viewer = viewer;
       setTimeout(() => this.uploadThumbnail(), 500);
-      this.$refs.objectListView.$data.viewer = this.viewer;
+      if (this.$refs.objectListView) {
+        this.$refs.objectListView.$data.viewer = this.viewer;
+        if (this.$refs.objectListView.setViewer) {
+          this.$refs.objectListView.setViewer(this.viewer);
+        }
+      }
     },
     objectClicked(object3d) {
       this.$refs.objectListView.selectListItem(object3d);

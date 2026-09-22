@@ -43,7 +43,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               <td>
                 <v-menu>
                   <template v-slot:activator="{ props }">
-                    <v-btn color="decoration" flat icon="mdi-dots-vertical" v-bind="props"></v-btn>
+                    <v-btn variant="text" icon="mdi-dots-vertical" v-bind="props"></v-btn>
                   </template>
                   <v-list>
                     <v-list-item @click="markAndRefresh(item, false)" v-if="item.read">

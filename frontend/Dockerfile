@@ -22,14 +22,15 @@ ENV VITE_MATOMO_URL=__VITE_MATOMO_URL__
 ENV VITE_MATOMO_SITE=__VITE_MATOMO_SITE__
 ENV VITE_STRIPE_PURCHASE_PEER_URL=__VITE_STRIPE_PURCHASE_PEER_URL__
 
+WORKDIR /app
+
+COPY package*.json ./
+RUN npm ci --fetch-retries 5 --fetch-retry-mintimeout 20000 --fetch-retry-maxtimeout 120000
+
 COPY ./ /app
 COPY .eslintrc*.js /
 
-WORKDIR /app
-
-# Reactivate at a later time, since we will do the version patch manually for now
-# RUN npm version patch && npm install && npm run build
-RUN npm ci && npm run build
+RUN npm run build
 
 # FROM nginx
 FROM openresty/openresty

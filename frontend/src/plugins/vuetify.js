@@ -24,18 +24,19 @@ const customLightTheme = {
   colors: {
     primary: '#0D47A1',
     secondary: '#607D8B',
-    decoration: '#EFEBE9',
+    decoration: '#9E9E9E',
     link: '#263238',
     error: '#B71C1C',
     cancel: '#9E9E9E',
     success: '#00C853',
     background: '#FAFAFA',
+    surface: '#FFFFFF',
     // 'placeholder' = subtle background for empty thumbnails, etc.
     // 'muted' = de-emphasized text (icons over placeholders).
     // 'surface-soft' = slightly-tinted card section (e.g., v-card-title bg).
     placeholder: '#F4F4F4',
-    muted: '#8D8D8D',
-    'surface-soft': '#FAFAFA',
+    muted: '#757575',
+    'surface-soft': '#F5F5F7',
   },
 };
 
@@ -44,13 +45,14 @@ const customDarkTheme = {
   colors: {
     primary: '#5C9CE6',
     secondary: '#B0BEC5',
-    decoration: '#2A2A2A',
+    decoration: '#757575',
     link: '#82B1FF',
     error: '#EF5350',
     cancel: '#BDBDBD',
     success: '#69F0AE',
     background: '#121212',
     surface: '#1E1E1E',
+    'surface-variant': '#2A2A2A',
     placeholder: '#2C2C2C',
     muted: '#9E9E9E',
     'surface-soft': '#262626',

@@ -89,8 +89,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 <v-card-actions class="bg-surface-soft">
                   <v-spacer />
                   <v-btn
-                    color="decoration"
-                    flat
+                    color="primary"
+                    variant="text"
                     icon="mdi-bookmark"
                     size="small"
                     @click.stop="openManageBookmarkDialog(bookmark.collectionSummary)"

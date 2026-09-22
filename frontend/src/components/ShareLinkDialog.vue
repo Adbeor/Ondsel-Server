@@ -22,7 +22,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           readonly
         >
           <template v-slot:append>
-            <v-btn icon color="decoration" flat @click="copyUrlToClipboard('sharedModelUrl')">
+            <v-btn icon color="primary" variant="text" @click="copyUrlToClipboard('sharedModelUrl')">
               <v-icon>
                 mdi-content-copy
               </v-icon>
@@ -42,7 +42,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             readonly
           >
             <template v-slot:append>
-              <v-btn icon color="decoration" flat @click="copyUrlToClipboard('sharedModelUrlWithPin')">
+              <v-btn icon color="primary" variant="text" @click="copyUrlToClipboard('sharedModelUrlWithPin')">
                 <v-icon>
                   mdi-content-copy
                 </v-icon>
@@ -62,7 +62,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           readonly
         >
           <template v-slot:append>
-            <v-btn icon color="decoration" flat @click="copyUrlToClipboard('freecadForumUrl')">
+            <v-btn icon color="primary" variant="text" @click="copyUrlToClipboard('freecadForumUrl')">
               <v-icon>
                 mdi-content-copy
               </v-icon>
@@ -82,7 +82,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           readonly
         >
           <template v-slot:append>
-            <v-btn icon color="decoration" flat @click="copyUrlToClipboard('iFrameUrl')">
+            <v-btn icon color="primary" variant="text" @click="copyUrlToClipboard('iFrameUrl')">
               <v-icon>
                 mdi-content-copy
               </v-icon>
