@@ -11,8 +11,7 @@ import { fitCameraToSelection, getSelectedObject } from '@/threejs/cameraUtils'
 import { Importer } from '@/threejs/libs/import/importer';
 import { OBJ_COLOR, OBJ_HIGHLIGHTED_COLOR, EDGE_COLOR } from '@/threejs/libs/constants';
 import { getObject3dFromScene } from '@/threejs/libs/utils/sceneutils';
-import {ModelObjectType} from "@/threejs/libs/model/object";
-import { MeasurementTool } from '@/threejs/measurementTool';
+import { MeasurementTool, fitCircle2D, getOrthonormalBasis } from '@/threejs/measurementTool';
 
 
 const ViewerConfig = {
@@ -933,6 +932,7 @@ export class Viewer {
     this.onSectionChangeCallback = null;
     this._isDraggingSectionPlane = false;
     this._sectionCutEdges = null;
+    this._sectionCutCircles = null;
   }
 
   initPartIndexMap() {
@@ -1475,6 +1475,7 @@ export class Viewer {
       const constant = this.sectionInvert ? -this.sectionOffset : this.sectionOffset;
       this.sectionPlane.set(normal, constant);
       this._sectionCutEdges = null;
+      this._sectionCutCircles = null;
 
       this.updateCapMeshTransform();
       this.updateCustomPlaneHelperTransform();
@@ -1594,6 +1595,7 @@ export class Viewer {
     const constant = this.sectionInvert ? -this.sectionOffset : this.sectionOffset;
     this.sectionPlane.set(normal, constant);
     this._sectionCutEdges = null;
+    this._sectionCutCircles = null;
 
     if (this.sectionActive) {
       // Local clipping on model meshes: renderer.clippingPlanes stays empty to prevent helper flickering!
@@ -1710,6 +1712,7 @@ export class Viewer {
         this.renderer.clearStencil();
       }
       this._sectionCutEdges = null;
+      this._sectionCutCircles = null;
     }
 
     if (this.measurementTool && typeof this.measurementTool.updateSectionClipping === 'function') {
@@ -1840,17 +1843,29 @@ export class Viewer {
       }
 
       if (rawSegments.length > 0) {
-        const mergedForMesh = this._mergeCollinearCutSegments(rawSegments, mesh);
+        const { edges: mergedForMesh, circles: circlesForMesh } = this._mergeCollinearCutSegments(rawSegments, mesh);
         allCutEdges.push(...mergedForMesh);
+        if (circlesForMesh && circlesForMesh.length > 0) {
+          allCutCircles.push(...circlesForMesh);
+        }
       }
     }
 
     this._sectionCutEdges = allCutEdges;
+    this._sectionCutCircles = allCutCircles;
     return allCutEdges;
   }
 
+  getSectionCutCircles() {
+    if (this._sectionCutCircles !== null) {
+      return this._sectionCutCircles;
+    }
+    this.getSectionCutEdges();
+    return this._sectionCutCircles || [];
+  }
+
   _mergeCollinearCutSegments(segs, mesh) {
-    if (!segs || segs.length === 0) return [];
+    if (!segs || segs.length === 0) return { edges: [], circles: [] };
 
     const factor = 1000;
     const keyOf = (p) => `${Math.round(p.x * factor)}_${Math.round(p.y * factor)}_${Math.round(p.z * factor)}`;
@@ -1922,10 +1937,93 @@ export class Viewer {
     }
 
     const resultEdges = [];
+    const resultCircles = [];
+
+    // Plane basis for 2D circle projection
+    let planeNorm = null;
+    let U = null, V = null;
+    if (this.sectionPlane) {
+      planeNorm = this.sectionPlane.normal.clone().normalize();
+      const basis = getOrthonormalBasis(planeNorm);
+      U = basis.U;
+      V = basis.V;
+    }
+
     for (let p = 0; p < paths.length; p++) {
       const path = paths[p];
       if (path.length < 2) continue;
       const isClosed = (path[0] === path[path.length - 1]) && path.length > 2;
+
+      // 1. Check if path represents a 2D circle or circular arc on the section plane
+      let detectedCutCircle = null;
+      const nCheckPts = isClosed ? path.length - 1 : path.length;
+      if (U && V && nCheckPts >= 6) {
+        const pathPts = [];
+        for (let i = 0; i < nCheckPts; i++) {
+          pathPts.push(nodes[path[i]]);
+        }
+        const pts2D = pathPts.map(pt => ({ u: pt.dot(U), v: pt.dot(V) }));
+        const fit = fitCircle2D(pts2D);
+
+        if (fit && fit.r >= 0.1 && fit.relError <= 0.04) {
+          const polarAngles = pts2D.map(pt => Math.atan2(pt.v - fit.vc, pt.u - fit.uc)).sort((a, b) => a - b);
+          let maxGap = 0;
+          for (let i = 0; i < polarAngles.length; i++) {
+            const gap = (i === polarAngles.length - 1)
+              ? (polarAngles[0] + 2 * Math.PI - polarAngles[i])
+              : (polarAngles[i + 1] - polarAngles[i]);
+            if (gap > maxGap) maxGap = gap;
+          }
+          const maxGapDeg = maxGap * (180 / Math.PI);
+
+          let isValidCircle = false;
+          if (isClosed && maxGapDeg <= 55.0) {
+            isValidCircle = true;
+          } else if (!isClosed) {
+            let maxInnerGap = 0;
+            for (let i = 0; i < polarAngles.length - 1; i++) {
+              const g = polarAngles[i + 1] - polarAngles[i];
+              if (g > maxInnerGap) maxInnerGap = g;
+            }
+            const totalSpanDeg = (polarAngles[polarAngles.length - 1] - polarAngles[0]) * (180 / Math.PI);
+            if (maxInnerGap * (180 / Math.PI) <= 45.0 && totalSpanDeg >= 45.0) {
+              isValidCircle = true;
+            }
+          }
+
+          if (isValidCircle) {
+            const planeConstant = this.sectionPlane.constant;
+            const centerWorld = new THREE.Vector3()
+              .addScaledVector(U, fit.uc)
+              .addScaledVector(V, fit.vc)
+              .addScaledVector(planeNorm, -planeConstant);
+
+            detectedCutCircle = {
+              type: 'circle',
+              isCutCircle: true,
+              isHole: false,
+              label: isClosed ? 'Círculo de Sección (Corte)' : 'Arco de Sección (Corte)',
+              mesh: mesh,
+              radius: fit.r,
+              diameter: fit.r * 2,
+              depth: 0,
+              center: centerWorld,
+              topCenter: centerWorld,
+              bottomCenter: centerWorld,
+              rimCenter: centerWorld,
+              otherRimCenter: null,
+              axis: planeNorm.clone(),
+              U: U.clone(),
+              V: V.clone(),
+              isClosed,
+              hitPoint: centerWorld.clone(),
+              trianglesCount: nCheckPts,
+              pathEdges: []
+            };
+            resultCircles.push(detectedCutCircle);
+          }
+        }
+      }
 
       let pStart = nodes[path[0]];
       let pPrev = nodes[path[1]];
@@ -1949,7 +2047,8 @@ export class Viewer {
               direction: edgeDir,
               midpoint: new THREE.Vector3().addVectors(pStart, pPrev).multiplyScalar(0.5),
               mesh: mesh,
-              isCutEdge: true
+              isCutEdge: true,
+              cutCircle: detectedCutCircle
             });
           }
           pStart = pPrev;
@@ -1968,7 +2067,8 @@ export class Viewer {
           direction: edgeDir,
           midpoint: new THREE.Vector3().addVectors(pStart, pPrev).multiplyScalar(0.5),
           mesh: mesh,
-          isCutEdge: true
+          isCutEdge: true,
+          cutCircle: detectedCutCircle
         });
       }
 
@@ -1981,6 +2081,10 @@ export class Viewer {
           last.midpoint = new THREE.Vector3().addVectors(last.p1, last.p2).multiplyScalar(0.5);
           pathEdges.shift();
         }
+      }
+
+      if (detectedCutCircle) {
+        detectedCutCircle.pathEdges = pathEdges;
       }
 
       resultEdges.push(...pathEdges);
@@ -2007,7 +2111,7 @@ export class Viewer {
       }
     }
 
-    return resultEdges;
+    return { edges: resultEdges, circles: resultCircles };
   }
 }
 

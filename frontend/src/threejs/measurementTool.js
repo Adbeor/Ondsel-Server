@@ -357,6 +357,7 @@ export function isEdgeVisibleUnderPlane(edgeData, plane) {
  */
 export function isCylinderVisibleUnderPlane(cylData, plane) {
   if (!cylData || !plane) return true;
+  if (cylData.isCutCircle) return true;
   const pts = [
     cylData.topCenter,
     cylData.bottomCenter,
@@ -368,7 +369,53 @@ export function isCylinderVisibleUnderPlane(cylData, plane) {
   for (let i = 0; i < pts.length; i++) {
     if (plane.distanceToPoint(pts[i]) >= -0.005) return true;
   }
+  // Check if section plane intersects the axis between bottom and top
+  if (cylData.bottomCenter && cylData.topCenter && cylData.axis) {
+    const d1 = plane.distanceToPoint(cylData.bottomCenter);
+    const d2 = plane.distanceToPoint(cylData.topCenter);
+    if ((d1 >= -0.005 && d2 < -0.005) || (d1 < -0.005 && d2 >= -0.005)) return true;
+  }
   return false;
+}
+
+/**
+ * Finds optimal visible 3D anchor for badge/rings on a cylinder clipped by section plane.
+ */
+export function findVisibleCylinderAnchor(cylData, plane) {
+  if (!cylData) return null;
+  const defaultPt = cylData.topCenter || cylData.rimCenter || cylData.center || cylData.hitPoint;
+  if (!plane) return defaultPt;
+
+  // 1. If default point is visible, use it
+  if (defaultPt && plane.distanceToPoint(defaultPt) >= -0.005) {
+    return defaultPt;
+  }
+
+  // 2. If cylinder axis intersects section plane between bottom and top:
+  if (cylData.axis && (cylData.topCenter || cylData.center)) {
+    const P0 = cylData.center || cylData.topCenter;
+    const denom = plane.normal.dot(cylData.axis);
+    if (Math.abs(denom) > 1e-4) {
+      const t = -(plane.normal.dot(P0) + plane.constant) / denom;
+      const Pcut = P0.clone().addScaledVector(cylData.axis, t);
+      const maxSpan = (cylData.depth > 0.05 ? cylData.depth * 0.6 : cylData.radius * 2);
+      if (Pcut.distanceTo(P0) <= maxSpan * 1.5) {
+        return Pcut;
+      }
+    }
+  }
+
+  // 3. If bottomCenter is visible, use it
+  if (cylData.bottomCenter && plane.distanceToPoint(cylData.bottomCenter) >= -0.005) {
+    return cylData.bottomCenter;
+  }
+
+  // 4. Fallback to hitPoint if visible
+  if (cylData.hitPoint && plane.distanceToPoint(cylData.hitPoint) >= -0.005) {
+    return cylData.hitPoint;
+  }
+
+  return defaultPt;
 }
 
 /**
@@ -1435,12 +1482,115 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
     }
   }
 
+  // 1.5 CHECK: Planar circular face / end cap (e.g. flat circular cap or base of cylinder)
+  const planarFace = extractCADPlanarFace(mesh, seedTriangleIndex, hitPoint, cameraRayDirection);
+  if (planarFace && planarFace.boundaryGeometry) {
+    const bPos = planarFace.boundaryGeometry.attributes.position;
+    if (bPos && bPos.count >= 16) {
+      const factor = 1000;
+      const keyOf = (p) => `${Math.round(p.x * factor)}_${Math.round(p.y * factor)}_${Math.round(p.z * factor)}`;
+      const nodeMap = new Map();
+      const nodes = [];
+      const getOrCreateNode = (p) => {
+        const k = keyOf(p);
+        if (nodeMap.has(k)) return nodeMap.get(k);
+        const id = nodes.length;
+        nodes.push(p);
+        nodeMap.set(k, id);
+        return id;
+      };
+
+      const adj = new Map();
+      const pA = new THREE.Vector3();
+      const pB = new THREE.Vector3();
+      for (let i = 0; i < bPos.count; i += 2) {
+        pA.fromBufferAttribute(bPos, i);
+        pB.fromBufferAttribute(bPos, i + 1);
+        const id1 = getOrCreateNode(pA.clone());
+        const id2 = getOrCreateNode(pB.clone());
+        if (id1 === id2) continue;
+        if (!adj.has(id1)) adj.set(id1, new Set());
+        if (!adj.has(id2)) adj.set(id2, new Set());
+        adj.get(id1).add(id2);
+        adj.get(id2).add(id1);
+      }
+
+      const visitedEdges = new Set();
+      const edgeKey = (a, b) => (a < b ? `${a}_${b}` : `${b}_${a}`);
+
+      for (const [node, neighbors] of adj.entries()) {
+        for (const n of neighbors) {
+          if (visitedEdges.has(edgeKey(node, n))) continue;
+          const loop = [node, n];
+          visitedEdges.add(edgeKey(node, n));
+          let prev = node;
+          let curr = n;
+          let isClosed = false;
+          while (true) {
+            const nextNbrs = Array.from(adj.get(curr) || []).filter(nb => nb !== prev && !visitedEdges.has(edgeKey(curr, nb)));
+            if (nextNbrs.length === 1) {
+              const next = nextNbrs[0];
+              visitedEdges.add(edgeKey(curr, next));
+              loop.push(next);
+              prev = curr;
+              curr = next;
+              if (curr === node) {
+                isClosed = true;
+                break;
+              }
+            } else {
+              break;
+            }
+          }
+
+          if (isClosed && loop.length >= 8) {
+            const loopPts = loop.map(id => nodes[id]);
+            const norm = planarFace.normal.clone();
+            const { U, V } = getOrthonormalBasis(norm);
+            const pts2D = loopPts.map(p => ({ u: p.dot(U), v: p.dot(V) }));
+            const fit = fitCircle2D(pts2D);
+            if (fit && fit.r >= 0.1 && fit.relError <= 0.035) {
+              const planeConstant = -norm.dot(loopPts[0]);
+              const centerWorld = new THREE.Vector3()
+                .addScaledVector(U, fit.uc)
+                .addScaledVector(V, fit.vc)
+                .addScaledVector(norm, -planeConstant);
+
+              return {
+                type: 'circle',
+                isHole: false,
+                label: 'Cara Circular (Base / Tapa)',
+                mesh,
+                radius: fit.r,
+                diameter: fit.r * 2,
+                depth: 0,
+                center: centerWorld,
+                rimCenter: centerWorld,
+                otherRimCenter: null,
+                topCenter: centerWorld,
+                bottomCenter: centerWorld,
+                axis: norm,
+                U,
+                V,
+                cylinderGeometry: null,
+                boundaryGeometry: planarFace.boundaryGeometry,
+                triangleIndicesSet: planarFace.triangleIndicesSet,
+                trianglesCount: planarFace.trianglesCount,
+                hitPoint: hitPoint.clone()
+              };
+            }
+          }
+        }
+      }
+    }
+  }
+
   // 2. SECONDARY: Cylinder Wall Detection (when user clicks on a cylindrical wall)
   // On a cylindrical surface, neighboring facets curve continuously.
   let candidateAxis = null;
   const bfsQueue = [seedTriangleIndex];
   const bfsVisited = new Set([seedTriangleIndex]);
-  const maxBfsSearch = 64;
+  const maxBfsSearch = 256;
 
   while (bfsQueue.length > 0 && bfsVisited.size < maxBfsSearch && !candidateAxis) {
     const curIdx = bfsQueue.shift();
@@ -1453,8 +1603,8 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
         bfsVisited.add(ni);
         const nbr = triangles[ni];
         const dot = seedTri.normal.dot(nbr.normal);
-        // Adjacent facets on a cylinder have dot between 0.70 (coarse 8-gon) and 0.9995
-        if (dot > 0.70 && dot < 0.9995) {
+        // Adjacent facets on a cylinder have dot between 0.70 (coarse 8-gon) and 0.999995
+        if (dot > 0.70 && dot < 0.999995) {
           const cross = new THREE.Vector3().crossVectors(seedTri.normal, nbr.normal);
           if (cross.lengthSq() > 1e-6) {
             candidateAxis = cross.normalize();
@@ -1558,7 +1708,7 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
               if (g > maxArcInnerGap) maxArcInnerGap = g;
             }
             const totalSpanDeg = (polarAngles[polarAngles.length - 1] - polarAngles[0]) * (180 / Math.PI);
-            if (maxArcInnerGap * (180 / Math.PI) > 35.0 || totalSpanDeg < 45.0 || uniqueCrossPts.length < 6) {
+            if (maxArcInnerGap * (180 / Math.PI) > 55.0 || totalSpanDeg < 45.0 || uniqueCrossPts.length < 6) {
               return null;
             }
           }
@@ -1612,7 +1762,7 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
             const nV = triNormWorld.dot(V);
             normBins.add(Math.round(Math.atan2(nV, nU) / (Math.PI / 12)));
           }
-          if (badNormals > cylTriangles.length * 0.15 || normBins.size < 6) {
+          if (badNormals > cylTriangles.length * 0.15 || normBins.size < 4) {
             return null;
           }
 
@@ -2336,6 +2486,54 @@ export class MeasurementTool {
       validHits.push(hit);
     }
 
+    // Check for Section Cut Circle Snap (or inside cut circle cap) if section is active and not in 'planes' mode
+    if (this.mode !== 'planes' && this.viewer.sectionActive && this.viewer.sectionPlane && typeof this.viewer.getSectionCutCircles === 'function') {
+      const cutCircles = this.viewer.getSectionCutCircles();
+      if (cutCircles && cutCircles.length > 0) {
+        const hitPlanePt = new THREE.Vector3();
+        if (this.raycaster.ray.intersectPlane(this.viewer.sectionPlane, hitPlanePt)) {
+          const toHit = hitPlanePt.clone().sub(this.raycaster.ray.origin);
+          if (toHit.dot(this.raycaster.ray.direction) > 0) {
+            const cutDist = toHit.length();
+            const firstHitDist = validHits.length > 0 ? validHits[0].distance : Infinity;
+            if (firstHitDist >= cutDist - 1.0) {
+              const threshold = this.getSnapThreshold(hitPlanePt);
+              for (let c = 0; c < cutCircles.length; c++) {
+                const circ = cutCircles[c];
+                const distToCenter = hitPlanePt.distanceTo(circ.center);
+                const distToRim = Math.abs(distToCenter - circ.radius);
+
+                // In radius mode, snap anywhere inside the circular slice or near circumference
+                // In other modes, snap within threshold of circumference
+                const isRadiusMode = (this.mode === 'radius');
+                const isNearCircumference = distToRim <= threshold * 1.5;
+                const isInsideCap = isRadiusMode && (distToCenter <= circ.radius + threshold);
+
+                if (isNearCircumference || isInsideCap) {
+                  const radVec = hitPlanePt.clone().sub(circ.center);
+                  const radLen = radVec.length();
+                  const rimPt = radLen > 1e-4
+                    ? circ.center.clone().addScaledVector(radVec.normalize(), circ.radius)
+                    : circ.center.clone().addScaledVector(circ.U, circ.radius);
+
+                  return {
+                    type: 'circle',
+                    point: isNearCircumference ? rimPt : circ.center.clone(),
+                    normal: circ.axis.clone(),
+                    cutCircle: circ,
+                    cylData: circ,
+                    edgeData: circ.pathEdges && circ.pathEdges.length > 0 ? circ.pathEdges[0] : null,
+                    rawHit: { object: circ.mesh, point: hitPlanePt.clone(), faceIndex: 0 },
+                    isCutCircle: true
+                  };
+                }
+              }
+            }
+          }
+        }
+      }
+    }
+
     // Check for Section Cut Edge Snap if section is active and not in 'planes' mode
     if (this.mode !== 'planes' && this.viewer.sectionActive && this.viewer.sectionPlane && typeof this.viewer.getSectionCutEdges === 'function') {
       const cutEdges = this.viewer.getSectionCutEdges();
@@ -2367,6 +2565,20 @@ export class MeasurementTool {
             let snapType = 'edge';
             let snappedPoint = bestCutPtSeg.clone();
             const threshold = this.getSnapThreshold(bestCutPtSeg);
+
+            if (bestCutEdge.cutCircle) {
+              return {
+                type: 'circle',
+                point: snappedPoint,
+                normal: this.viewer.sectionPlane.normal.clone(),
+                cutCircle: bestCutEdge.cutCircle,
+                cylData: bestCutEdge.cutCircle,
+                edgeData: bestCutEdge,
+                rawHit: { object: bestCutEdge.mesh, point: bestCutPtSeg, faceIndex: 0 },
+                isCutCircle: true,
+                isCutEdge: true
+              };
+            }
 
             if (this.mode === 'distance' || this.mode === 'smart') {
               const d1 = bestCutPtSeg.distanceTo(bestCutEdge.p1);
@@ -2595,9 +2807,9 @@ export class MeasurementTool {
    * Process Radius / Cylinder / Hole selection (Bambu Studio / OrcaSlicer style)
    */
   processRadiusSelection(snap) {
-    // 1. Try automatic CAD cylinder / hole detection
-    let cylData = null;
-    if (snap.rawHit && snap.rawHit.object && snap.rawHit.faceIndex !== undefined) {
+    // 1. Try automatic CAD cylinder / hole / cut circle detection
+    let cylData = snap.cutCircle || (snap.edgeData && snap.edgeData.cutCircle) || snap.cylData || null;
+    if (!cylData && snap.rawHit && snap.rawHit.object && snap.rawHit.faceIndex !== undefined) {
       cylData = detectCADCylinderOrCircle(snap.rawHit.object, snap.rawHit.faceIndex, snap.point, this.raycaster.ray.direction);
     }
 
@@ -2618,9 +2830,14 @@ export class MeasurementTool {
         // Step 2: Select Cylinder 2
         if (
           this.firstSelection.cylData &&
-          this.firstSelection.cylData.mesh === snap.rawHit.object &&
-          this.firstSelection.cylData.triangleIndicesSet &&
-          this.firstSelection.cylData.triangleIndicesSet.has(snap.rawHit.faceIndex)
+          (
+            this.firstSelection.cylData === cylData ||
+            (
+              this.firstSelection.cylData.mesh === (snap.rawHit && snap.rawHit.object) &&
+              this.firstSelection.cylData.triangleIndicesSet &&
+              this.firstSelection.cylData.triangleIndicesSet.has(snap.rawHit && snap.rawHit.faceIndex)
+            )
+          )
         ) {
           console.log('[CAD Measure] Clic en el mismo cilindro que Cilindro 1. Ignorado.');
           return;
@@ -2765,6 +2982,16 @@ export class MeasurementTool {
       selectedItem = {
         kind: 'vertex',
         point: snap.point.clone()
+      };
+    }
+
+    // 1.5 Check Cut Circle (or circle edge)
+    const cutCirc = snap.cutCircle || (snap.edgeData && snap.edgeData.cutCircle);
+    if (!selectedItem && cutCirc) {
+      selectedItem = {
+        kind: 'cylinder',
+        cylData: cutCirc,
+        point: (cutCirc.topCenter || cutCirc.rimCenter || cutCirc.center).clone()
       };
     }
 
@@ -3054,7 +3281,8 @@ export class MeasurementTool {
    * Single cylinder/hole measurement details
    */
   computeSingleCylinderMeasurement(cylData) {
-    const centerPoint = cylData.topCenter || cylData.rimCenter || cylData.center || cylData.hitPoint;
+    const plane = (this.viewer && this.viewer.sectionActive) ? this.viewer.sectionPlane : null;
+    const centerPoint = this.findVisibleCylinderAnchor(cylData, plane) || cylData.topCenter || cylData.rimCenter || cylData.center || cylData.hitPoint;
     this.currentMeasurement = {
       type: 'cylinder_single',
       title: cylData.label || 'Orificio Cilíndrico',
@@ -3064,12 +3292,13 @@ export class MeasurementTool {
       secondaryValue: `Radio: ${cylData.radius.toFixed(2)} mm${cylData.depth > 0.05 ? ` | Profundidad: ${cylData.depth.toFixed(2)} mm` : ''}`,
       targetMeshes: [cylData.mesh].filter(Boolean),
       targetPoints: centerPoint ? [centerPoint.clone()] : [],
+      cylData: cylData,
       details: [
         { label: 'Diámetro (Ø)', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
         { label: 'Radio (R)', value: `${cylData.radius.toFixed(2)} mm` },
         { label: 'Profundidad / Longitud', value: cylData.depth > 0.05 ? `${cylData.depth.toFixed(2)} mm` : '0.00 mm (Plano)' },
-        { label: 'Tipo Geométrico', value: cylData.isHole ? 'Orificio Interior (Bore/Hole)' : 'Cilindro Exterior (Pin/Shaft)' },
-        { label: 'Centro 3D (Borde)', value: formatVec3(cylData.topCenter || cylData.rimCenter || cylData.center) },
+        { label: 'Tipo Geométrico', value: cylData.isCutCircle ? 'Círculo de Sección (Corte)' : (cylData.isHole ? 'Orificio Interior (Bore/Hole)' : 'Cilindro Exterior (Pin/Shaft)') },
+        { label: 'Centro 3D (Borde)', value: formatVec3(centerPoint) },
         { label: 'Eje 3D', value: `[${cylData.axis.x.toFixed(2)}, ${cylData.axis.y.toFixed(2)}, ${cylData.axis.z.toFixed(2)}]` },
         { label: 'Facetas interpoladas', value: `${cylData.trianglesCount} triángulos` }
       ]
@@ -3077,8 +3306,9 @@ export class MeasurementTool {
 
     this.badges = [{
       id: 'measure-main',
-      worldPos: (cylData.topCenter || cylData.rimCenter || cylData.center).clone(),
+      worldPos: centerPoint.clone(),
       text: `Ø ${cylData.diameter.toFixed(2)} mm`,
+      targetCylinders: [cylData],
       screenX: 0,
       screenY: 0,
       visible: false
@@ -3853,8 +4083,30 @@ export class MeasurementTool {
 
     if (this.snapMarkerRing) this.snapMarkerRing.visible = false;
 
-    // 1. If snap already contains edgeData (e.g. section cut edge)
-    if (snap.edgeData) {
+    // 0.5 If snap is a Cut Circle (or contains cutCircle / cylData)
+    const targetCutCircle = snap.cutCircle || (snap.edgeData && snap.edgeData.cutCircle);
+    if (targetCutCircle) {
+      if (
+        this.currentHoverFaceData === targetCutCircle &&
+        this.currentHoverMesh === targetCutCircle.mesh
+      ) {
+        return;
+      }
+      this.clearHoverFace();
+      this.currentHoverMesh = targetCutCircle.mesh;
+      this.currentHoverFaceData = targetCutCircle;
+      this.snapMarker.visible = false;
+      const hoverGroup = this.renderCylinderHighlight(targetCutCircle, hoverColor, true);
+      this.hoverGroup.add(hoverGroup);
+      this.statusPrompt = !this.firstSelection
+        ? `Círculo de corte detectado (Ø ${targetCutCircle.diameter.toFixed(2)} mm). Clic para fijar como Elemento 1`
+        : `Círculo de corte detectado (Ø ${targetCutCircle.diameter.toFixed(2)} mm). Clic para fijar como Elemento 2`;
+      this.emitUpdate();
+      return;
+    }
+
+    // 1. If snap already contains edgeData (e.g. section cut edge) and not in 'radius' mode
+    if (this.mode !== 'radius' && snap.edgeData) {
       const edgeData = snap.edgeData;
       if (
         this.currentHoverEdgeData &&
@@ -4052,6 +4304,10 @@ export class MeasurementTool {
     return isCylinderVisibleUnderPlane(cylData, plane);
   }
 
+  findVisibleCylinderAnchor(cylData, plane) {
+    return findVisibleCylinderAnchor(cylData, plane);
+  }
+
   /**
    * Dynamically finds a visible anchor pair (Q2 on Plane 2, Q1 on Plane 1) when section cut is active.
    * If both original points (P2 and projP1) are visible (>= 0.05 mm), preserves them exactly.
@@ -4167,6 +4423,18 @@ export class MeasurementTool {
       }
     }
 
+    // 1b. Active single cylinder measurement
+    if (this.currentMeasurement && this.currentMeasurement.type === 'cylinder_single' && this.currentMeasurement.cylData) {
+      const anchor = this.findVisibleCylinderAnchor(this.currentMeasurement.cylData, plane);
+      if (anchor && this.badges && this.badges.length > 0) {
+        for (let i = 0; i < this.badges.length; i++) {
+          if (this.badges[i].id === 'measure-main') {
+            this.badges[i].worldPos.copy(anchor);
+          }
+        }
+      }
+    }
+
     // 2. Saved measurements
     if (this.savedMeasurements && this.savedMeasurements.length > 0) {
       for (let i = 0; i < this.savedMeasurements.length; i++) {
@@ -4194,6 +4462,13 @@ export class MeasurementTool {
           if (sm.badges && sm.badges.length > 0) {
             for (let j = 0; j < sm.badges.length; j++) {
               sm.badges[j].worldPos.copy(mid);
+            }
+          }
+        } else if (sm.data && sm.data.type === 'cylinder_single' && sm.data.cylData) {
+          const anchor = this.findVisibleCylinderAnchor(sm.data.cylData, plane);
+          if (anchor && sm.badges && sm.badges.length > 0) {
+            for (let j = 0; j < sm.badges.length; j++) {
+              sm.badges[j].worldPos.copy(anchor);
             }
           }
         }
@@ -4247,16 +4522,23 @@ export class MeasurementTool {
       return createThickRingMesh(centerPt, cylData.U, cylData.V, cylData.radius, halfW, colorHex, isHover, order, !this.xray);
     };
 
-    const topCenter = cylData.topCenter || cylData.rimCenter || cylData.center;
+    const plane = (this.viewer && this.viewer.sectionActive) ? this.viewer.sectionPlane : null;
+    let topCenter = cylData.topCenter || cylData.rimCenter || cylData.center;
+    if (plane && topCenter && plane.distanceToPoint(topCenter) < -0.005) {
+      const visibleAnchor = this.findVisibleCylinderAnchor(cylData, plane);
+      if (visibleAnchor) topCenter = visibleAnchor;
+    }
     const bottomCenter = cylData.bottomCenter || cylData.otherRimCenter;
 
     if (topCenter) {
       group.add(createRing(topCenter, true));
     }
 
-    // Second circular ring at opposite rim if cylinder has depth
+    // Second circular ring at opposite rim if cylinder has depth and rim is visible
     if (bottomCenter && cylData.depth > 0.5) {
-      group.add(createRing(bottomCenter, false));
+      if (!plane || plane.distanceToPoint(bottomCenter) >= -0.005) {
+        group.add(createRing(bottomCenter, false));
+      }
     }
 
     // 3. Central click pin, crosshairs, and axis line (only for locked selections, not hover)
@@ -4290,7 +4572,7 @@ export class MeasurementTool {
       group.add(createThickLineMesh(v1, v2, chRodR, colorHex, !this.xray));
 
       // Central Axis line (extending through the hole)
-      if (cylData.bottomCenter && cylData.topCenter) {
+      if (cylData.bottomCenter && cylData.topCenter && !cylData.isCutCircle && cylData.depth > 0.5) {
         const ext = Math.max(cylData.radius * 0.15, 1.0);
         const axisP1 = cylData.bottomCenter.clone().addScaledVector(cylData.axis, -ext);
         const axisP2 = cylData.topCenter.clone().addScaledVector(cylData.axis, ext);
