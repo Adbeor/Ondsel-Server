@@ -273,6 +273,38 @@ export function extractCADPlanarFace(mesh, seedTriangleIndex, hitPoint, cameraRa
     boundaryGeometry = new THREE.BufferGeometry().setFromPoints(boundarySegments);
   }
 
+  // Collect sample points (boundary + surface) for partial cut visibility testing
+  const samplePoints = [];
+  if (hitPoint) {
+    samplePoints.push(hitPoint.clone());
+  }
+
+  // 1. Boundary perimeter samples
+  const bCount = boundarySegments.length;
+  if (bCount > 0) {
+    const bStep = Math.max(1, Math.floor(bCount / 120));
+    for (let i = 0; i < bCount; i += bStep) {
+      samplePoints.push(boundarySegments[i].clone());
+    }
+  }
+
+  // 2. Surface / interior samples from triangles
+  const tCount = faceTriangles.length;
+  if (tCount > 0) {
+    const tStep = Math.max(1, Math.floor(tCount / 80));
+    const vA = new THREE.Vector3();
+    const vB = new THREE.Vector3();
+    const vC = new THREE.Vector3();
+    for (let i = 0; i < tCount; i += tStep) {
+      const tri = faceTriangles[i];
+      vA.fromBufferAttribute(pos, tri.indices[0]).applyMatrix4(mesh.matrixWorld);
+      vB.fromBufferAttribute(pos, tri.indices[1]).applyMatrix4(mesh.matrixWorld);
+      vC.fromBufferAttribute(pos, tri.indices[2]).applyMatrix4(mesh.matrixWorld);
+      const centroid = new THREE.Vector3().add(vA).add(vB).add(vC).multiplyScalar(1 / 3);
+      samplePoints.push(centroid);
+    }
+  }
+
   return {
     mesh,
     seedTriangleIndex,
@@ -282,8 +314,61 @@ export function extractCADPlanarFace(mesh, seedTriangleIndex, hitPoint, cameraRa
     faceGeometry,
     boundaryGeometry,
     boundarySegments,
+    samplePoints,
     hitPoint: hitPoint.clone()
   };
+}
+
+/**
+ * Evaluates whether a CAD planar face has any visible portion remaining on screen under section plane.
+ * Returns true if at least one sample point has distance >= -0.005.
+ * Returns false only if every single sample point is in the cut-away half-space.
+ */
+export function isFaceVisibleUnderPlane(faceData, plane) {
+  if (!faceData || !plane) return true;
+  const samples = faceData.samplePoints;
+  if (samples && samples.length > 0) {
+    for (let i = 0; i < samples.length; i++) {
+      if (plane.distanceToPoint(samples[i]) >= -0.005) {
+        return true;
+      }
+    }
+    return false;
+  }
+  if (faceData.hitPoint) {
+    return plane.distanceToPoint(faceData.hitPoint) >= -0.005;
+  }
+  return true;
+}
+
+/**
+ * Evaluates whether a CAD straight edge has any visible portion remaining under section plane.
+ */
+export function isEdgeVisibleUnderPlane(edgeData, plane) {
+  if (!edgeData || !plane) return true;
+  if (edgeData.p1 && plane.distanceToPoint(edgeData.p1) >= -0.005) return true;
+  if (edgeData.p2 && plane.distanceToPoint(edgeData.p2) >= -0.005) return true;
+  if (edgeData.midpoint && plane.distanceToPoint(edgeData.midpoint) >= -0.005) return true;
+  return false;
+}
+
+/**
+ * Evaluates whether a CAD cylinder or hole has any visible portion remaining under section plane.
+ */
+export function isCylinderVisibleUnderPlane(cylData, plane) {
+  if (!cylData || !plane) return true;
+  const pts = [
+    cylData.topCenter,
+    cylData.bottomCenter,
+    cylData.rimCenter,
+    cylData.otherRimCenter,
+    cylData.center,
+    cylData.hitPoint
+  ].filter(Boolean);
+  for (let i = 0; i < pts.length; i++) {
+    if (plane.distanceToPoint(pts[i]) >= -0.005) return true;
+  }
+  return false;
 }
 
 /**
@@ -2033,6 +2118,9 @@ export class MeasurementTool {
 
     const targetMeshes = this.currentMeasurement.targetMeshes || [];
     const targetPoints = this.currentMeasurement.targetPoints || [];
+    const targetFaces = this.currentMeasurement.targetFaces || [];
+    const targetEdges = this.currentMeasurement.targetEdges || [];
+    const targetCylinders = this.currentMeasurement.targetCylinders || [];
 
     const savedBadges = this.badges.map((b, idx) => ({
       ...b,
@@ -2043,7 +2131,10 @@ export class MeasurementTool {
       offsetX: b.offsetX || 0,
       offsetY: b.offsetY || 0,
       targetMeshes: targetMeshes,
-      targetPoints: targetPoints
+      targetPoints: targetPoints,
+      targetFaces: targetFaces,
+      targetEdges: targetEdges,
+      targetCylinders: targetCylinders
     }));
 
     const savedEntry = {
@@ -2052,7 +2143,18 @@ export class MeasurementTool {
       group: subGroup,
       badges: savedBadges,
       targetMeshes: targetMeshes,
-      targetPoints: targetPoints
+      targetPoints: targetPoints,
+      targetFaces: targetFaces,
+      targetEdges: targetEdges,
+      targetCylinders: targetCylinders,
+      face1: this.currentMeasurement.face1,
+      face2: this.currentMeasurement.face2,
+      signedDist: this.currentMeasurement.signedDist,
+      isParallel: this.currentMeasurement.isParallel,
+      perpDist: this.currentMeasurement.perpDist,
+      P1: this.currentMeasurement.P1,
+      P2: this.currentMeasurement.P2,
+      n1: this.currentMeasurement.n1
     };
 
     this.savedMeasurements.push(savedEntry);
@@ -2925,13 +3027,26 @@ export class MeasurementTool {
       sel2.mesh || (sel2.rawHit && sel2.rawHit.object) || (sel2.faceData && sel2.faceData.mesh)
     ].filter(Boolean);
     const targetPoints = [P1, P2].filter(Boolean);
+    const targetFaces = [sel1.faceData, sel2.faceData].filter(Boolean);
     if (measurement) {
       measurement.targetMeshes = targetMeshes;
       measurement.targetPoints = targetPoints;
+      measurement.targetFaces = targetFaces;
+      measurement.face1 = sel1.faceData;
+      measurement.face2 = sel2.faceData;
+      measurement.signedDist = signedDist;
+      measurement.isParallel = isParallel;
+      measurement.perpDist = perpDist;
+      measurement.directDist = directDist;
+      measurement.acuteAngleDeg = acuteAngleDeg;
+      measurement.P1 = P1.clone();
+      measurement.P2 = P2.clone();
+      measurement.n1 = n1.clone();
+      measurement.n2 = n2.clone();
     }
 
     this.currentMeasurement = measurement;
-    this.renderPlanesDimensionVisual(P1, n1, P2, n2, isParallel, perpDist, directDist, acuteAngleDeg, signedDist);
+    this.renderPlanesDimensionVisual(P1, n1, P2, n2, isParallel, perpDist, directDist, acuteAngleDeg, signedDist, sel1.faceData, sel2.faceData);
     this.emitUpdate();
   }
 
@@ -3925,6 +4040,167 @@ export class MeasurementTool {
     return group;
   }
 
+  isFaceVisibleUnderPlane(faceData, plane) {
+    return isFaceVisibleUnderPlane(faceData, plane);
+  }
+
+  isEdgeVisibleUnderPlane(edgeData, plane) {
+    return isEdgeVisibleUnderPlane(edgeData, plane);
+  }
+
+  isCylinderVisibleUnderPlane(cylData, plane) {
+    return isCylinderVisibleUnderPlane(cylData, plane);
+  }
+
+  /**
+   * Dynamically finds a visible anchor pair (Q2 on Plane 2, Q1 on Plane 1) when section cut is active.
+   * If both original points (P2 and projP1) are visible (>= 0.05 mm), preserves them exactly.
+   * If one or both are cut away, searches face sample points to anchor the dimension rod and badge
+   * inside the visible remaining half-space.
+   */
+  findVisiblePlanesAnchor(P1, n1, P2, signedDist, face1, face2, plane) {
+    const origProj = P2.clone().sub(n1.clone().multiplyScalar(signedDist));
+    if (!plane) {
+      return { Q2: P2.clone(), Q1: origProj };
+    }
+
+    const dP2 = plane.distanceToPoint(P2);
+    const dProj = plane.distanceToPoint(origProj);
+    // If original points are both comfortably visible, preserve them!
+    if (dP2 >= 0.05 && dProj >= 0.05) {
+      return { Q2: P2.clone(), Q1: origProj };
+    }
+
+    const M0 = new THREE.Vector3().addVectors(P1, P2).multiplyScalar(0.5);
+    const pool2 = (face2 && face2.samplePoints && face2.samplePoints.length > 0) ? face2.samplePoints : [P2];
+    const pool1 = (face1 && face1.samplePoints && face1.samplePoints.length > 0) ? face1.samplePoints : [P1];
+
+    let bestPair = null;
+    let bestScore = -Infinity;
+    let fallbackPair = null;
+    let fallbackMinDist = -Infinity;
+
+    // Pool 2: Points on Face 2 projected along normal onto Plane 1
+    for (let i = 0; i < pool2.length; i++) {
+      const q2 = pool2[i];
+      const d2 = plane.distanceToPoint(q2);
+      const q1 = q2.clone().sub(n1.clone().multiplyScalar(signedDist));
+      const d1 = plane.distanceToPoint(q1);
+
+      const minD = Math.min(d1, d2);
+      if (minD > fallbackMinDist) {
+        fallbackMinDist = minD;
+        fallbackPair = { Q2: q2.clone(), Q1: q1 };
+      }
+
+      if (d2 >= -0.005 && d1 >= -0.005) {
+        const mid = new THREE.Vector3().addVectors(q1, q2).multiplyScalar(0.5);
+        const distM0 = mid.distanceTo(M0);
+        const score = Math.min(minD, 20.0) * 3.0 - distM0;
+        if (score > bestScore) {
+          bestScore = score;
+          bestPair = { Q2: q2.clone(), Q1: q1 };
+        }
+      }
+    }
+
+    // Pool 1: Points on Face 1 projected along normal onto Plane 2
+    for (let i = 0; i < pool1.length; i++) {
+      const q1 = pool1[i];
+      const d1 = plane.distanceToPoint(q1);
+      const q2 = q1.clone().add(n1.clone().multiplyScalar(signedDist));
+      const d2 = plane.distanceToPoint(q2);
+
+      const minD = Math.min(d1, d2);
+      if (minD > fallbackMinDist) {
+        fallbackMinDist = minD;
+        fallbackPair = { Q2: q2, Q1: q1.clone() };
+      }
+
+      if (d1 >= -0.005 && d2 >= -0.005) {
+        const mid = new THREE.Vector3().addVectors(q1, q2).multiplyScalar(0.5);
+        const distM0 = mid.distanceTo(M0);
+        const score = Math.min(minD, 20.0) * 3.0 - distM0;
+        if (score > bestScore) {
+          bestScore = score;
+          bestPair = { Q2: q2, Q1: q1.clone() };
+        }
+      }
+    }
+
+    if (bestPair) return bestPair;
+    if (fallbackPair) return fallbackPair;
+    return { Q2: P2.clone(), Q1: origProj };
+  }
+
+  updatePlanesDynamicAnchors() {
+    const plane = (this.viewer && this.viewer.sectionActive) ? this.viewer.sectionPlane : null;
+
+    // 1. Active draft measurement
+    if (this.currentMeasurement && this.currentMeasurement.type === 'planes' && this.currentMeasurement.face1 && this.currentMeasurement.face2) {
+      const cm = this.currentMeasurement;
+      const { Q2, Q1 } = this.findVisiblePlanesAnchor(cm.P1, cm.n1, cm.P2, cm.signedDist, cm.face1, cm.face2, plane);
+      const mid = new THREE.Vector3().addVectors(Q2, Q1).multiplyScalar(0.5);
+      const dir = new THREE.Vector3().subVectors(Q1, Q2);
+
+      const rod = this.visualsGroup.getObjectByName('dimRod');
+      if (rod) {
+        rod.position.copy(mid);
+        rod.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+      }
+      const mQ2 = this.visualsGroup.getObjectByName('markerQ2');
+      if (mQ2) mQ2.position.copy(Q2);
+      const mQ1 = this.visualsGroup.getObjectByName('markerQ1');
+      if (mQ1) mQ1.position.copy(Q1);
+
+      const extLine = this.visualsGroup.getObjectByName('extLine');
+      if (extLine) {
+        extLine.visible = (!plane || plane.distanceToPoint(cm.P1) >= -0.005);
+      }
+
+      if (this.badges && this.badges.length > 0) {
+        for (let i = 0; i < this.badges.length; i++) {
+          if (this.badges[i].id === 'measure-main') {
+            this.badges[i].worldPos.copy(mid);
+          }
+        }
+      }
+    }
+
+    // 2. Saved measurements
+    if (this.savedMeasurements && this.savedMeasurements.length > 0) {
+      for (let i = 0; i < this.savedMeasurements.length; i++) {
+        const sm = this.savedMeasurements[i];
+        if (sm.data && sm.data.type === 'planes' && sm.face1 && sm.face2 && sm.group) {
+          const { Q2, Q1 } = this.findVisiblePlanesAnchor(sm.P1, sm.n1, sm.P2, sm.signedDist, sm.face1, sm.face2, plane);
+          const mid = new THREE.Vector3().addVectors(Q2, Q1).multiplyScalar(0.5);
+          const dir = new THREE.Vector3().subVectors(Q1, Q2);
+
+          const rod = sm.group.getObjectByName('dimRod');
+          if (rod) {
+            rod.position.copy(mid);
+            rod.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
+          }
+          const mQ2 = sm.group.getObjectByName('markerQ2');
+          if (mQ2) mQ2.position.copy(Q2);
+          const mQ1 = sm.group.getObjectByName('markerQ1');
+          if (mQ1) mQ1.position.copy(Q1);
+
+          const extLine = sm.group.getObjectByName('extLine');
+          if (extLine) {
+            extLine.visible = (!plane || plane.distanceToPoint(sm.P1) >= -0.005);
+          }
+
+          if (sm.badges && sm.badges.length > 0) {
+            for (let j = 0; j < sm.badges.length; j++) {
+              sm.badges[j].worldPos.copy(mid);
+            }
+          }
+        }
+      }
+    }
+  }
+
   updateSectionClipping() {
     this.applySectionClipping(this.selectionGroup);
     this.applySectionClipping(this.hoverGroup);
@@ -3932,6 +4208,7 @@ export class MeasurementTool {
     if (this.savedGroup) {
       this.applySectionClipping(this.savedGroup);
     }
+    this.updatePlanesDynamicAnchors();
   }
 
   /**
@@ -4385,21 +4662,23 @@ export class MeasurementTool {
    * - Dashed projection extension line between P1 and projP1
    * - Floating 3D Badge with true perpendicular thickness
    */
-  renderPlanesDimensionVisual(P1, n1, P2, n2, isParallel, perpDist, directDist, angleDeg, signedDist) {
+  renderPlanesDimensionVisual(P1, n1, P2, n2, isParallel, perpDist, directDist, angleDeg, signedDist, face1 = null, face2 = null) {
     this.visualsGroup.clear();
     const group = new THREE.Group();
     const scale = this.getModelScale();
+    const plane = (this.viewer && this.viewer.sectionActive) ? this.viewer.sectionPlane : null;
 
     if (isParallel) {
-      // True orthogonal projection of P2 onto Plane 1
-      const projP1 = P2.clone().sub(n1.clone().multiplyScalar(signedDist));
+      // Dynamically find visible anchor pair (Q2 on Plane 2, Q1 on Plane 1)
+      const { Q2, Q1 } = this.findVisiblePlanesAnchor(P1, n1, P2, signedDist, face1, face2, plane);
 
       if (perpDist >= 0.05) {
         // 1. Solid perpendicular dimension rod
-        const perpLine = createThickLineMesh(P2, projP1, 0.85, this.getDimensionColor(), !this.xray, true);
+        const perpLine = createThickLineMesh(Q2, Q1, 0.85, this.getDimensionColor(), !this.xray, true);
+        perpLine.name = 'dimRod';
         group.add(perpLine);
 
-        // 2. Dimension end markers at P2 and projP1
+        // 2. Dimension end markers at Q2 and Q1
         const markerR = 1.25;
         const markerGeom = new THREE.SphereGeometry(markerR, 16, 16);
         const markerMat = new THREE.MeshBasicMaterial({
@@ -4412,31 +4691,37 @@ export class MeasurementTool {
         });
 
         const mP2 = new THREE.Mesh(markerGeom, markerMat);
-        mP2.position.copy(P2);
+        mP2.position.copy(Q2);
+        mP2.name = 'markerQ2';
         mP2.userData.isDimensionLine = true;
         mP2.renderOrder = 3021;
         group.add(mP2);
 
         const mProj = new THREE.Mesh(markerGeom, markerMat);
-        mProj.position.copy(projP1);
+        mProj.position.copy(Q1);
+        mProj.name = 'markerQ1';
         mProj.userData.isDimensionLine = true;
         mProj.renderOrder = 3021;
         group.add(mProj);
 
-        // 3. Extension projection reference line on Plane 1 (connecting P1 to projP1)
-        const extDist = P1.distanceTo(projP1);
-        if (extDist > 0.5) {
-          const extLine = createThickLineMesh(P1, projP1, 0.55, COLOR_ACCENT, !this.xray, true);
-          extLine.renderOrder = 3019;
-          group.add(extLine);
+        // 3. Extension projection reference line on Plane 1 (if P1 is visible and displaced from Q1)
+        if (!plane || plane.distanceToPoint(P1) >= -0.005) {
+          const extDist = P1.distanceTo(Q1);
+          if (extDist > 0.5) {
+            const extLine = createThickLineMesh(P1, Q1, 0.55, COLOR_ACCENT, !this.xray, true);
+            extLine.name = 'extLine';
+            extLine.renderOrder = 3019;
+            group.add(extLine);
+          }
         }
 
         // 4. Floating 3D Badge at perpendicular midpoint
-        const perpMid = new THREE.Vector3().addVectors(P2, projP1).multiplyScalar(0.5);
+        const perpMid = new THREE.Vector3().addVectors(Q2, Q1).multiplyScalar(0.5);
         this.badges = [{
           id: 'measure-main',
           worldPos: perpMid.clone(),
           text: `⟂ ${perpDist.toFixed(2)} mm`,
+          targetFaces: [face1, face2].filter(Boolean),
           screenX: 0,
           screenY: 0,
           visible: false
@@ -4444,6 +4729,7 @@ export class MeasurementTool {
       } else {
         // Coplanar faces: connecting rod between P1 and P2
         const coplanarLine = createThickLineMesh(P1, P2, 0.85, this.getDimensionColor(), !this.xray, true);
+        coplanarLine.name = 'dimRod';
         group.add(coplanarLine);
 
         const mid = new THREE.Vector3().addVectors(P1, P2).multiplyScalar(0.5);
@@ -4451,6 +4737,7 @@ export class MeasurementTool {
           id: 'measure-main',
           worldPos: mid.clone(),
           text: `0.00 mm (Coplanar)`,
+          targetFaces: [face1, face2].filter(Boolean),
           screenX: 0,
           screenY: 0,
           visible: false
@@ -4459,6 +4746,7 @@ export class MeasurementTool {
     } else {
       // Angled faces: connecting rod between P1 and P2
       const line = createThickLineMesh(P1, P2, 0.85, this.getDimensionColor(), !this.xray, true);
+      line.name = 'dimRod';
       group.add(line);
 
       const mid = new THREE.Vector3().addVectors(P1, P2).multiplyScalar(0.5);
@@ -4466,13 +4754,14 @@ export class MeasurementTool {
         id: 'measure-main',
         worldPos: mid.clone(),
         text: `∠ ${angleDeg.toFixed(1)}°`,
+        targetFaces: [face1, face2].filter(Boolean),
         screenX: 0,
         screenY: 0,
         visible: false
       }];
     }
 
-    this.visualsGroup.add(group);
+    this.visualsGroup.add(this.applySectionClipping(group));
   }
 
   /**
@@ -4588,17 +4877,61 @@ export class MeasurementTool {
     // 2. Check if the measurement is on a cut-away / removed section
     if (this.viewer && this.viewer.sectionActive && this.viewer.sectionPlane) {
       const plane = this.viewer.sectionPlane;
-      const points = entry.targetPoints;
-      if (points && points.length > 0) {
-        for (let i = 0; i < points.length; i++) {
-          const pt = points[i];
-          if (pt && plane.distanceToPoint(pt) < -0.005) {
-            return false; // Point is in the removed half-space!
+
+      // CAD Faces: If ANY measured face is COMPLETELY cut away, hide measurement.
+      // But as long as every measured face has at least one visible part, it remains visible!
+      if (entry.targetFaces && entry.targetFaces.length > 0) {
+        for (let i = 0; i < entry.targetFaces.length; i++) {
+          const face = entry.targetFaces[i];
+          if (!this.isFaceVisibleUnderPlane(face, plane)) {
+            return false;
           }
         }
       }
-      if (entry.worldPos && plane.distanceToPoint(entry.worldPos) < -0.005) {
-        return false;
+
+      // CAD Edges: If ANY measured edge is COMPLETELY cut away, hide measurement.
+      if (entry.targetEdges && entry.targetEdges.length > 0) {
+        for (let i = 0; i < entry.targetEdges.length; i++) {
+          const edge = entry.targetEdges[i];
+          if (!this.isEdgeVisibleUnderPlane(edge, plane)) {
+            return false;
+          }
+        }
+      }
+
+      // CAD Cylinders: If ANY measured cylinder is COMPLETELY cut away, hide measurement.
+      if (entry.targetCylinders && entry.targetCylinders.length > 0) {
+        for (let i = 0; i < entry.targetCylinders.length; i++) {
+          const cyl = entry.targetCylinders[i];
+          if (!this.isCylinderVisibleUnderPlane(cyl, plane)) {
+            return false;
+          }
+        }
+      }
+
+      // Pure entity measurements (face-face, edge-edge, cyl-cyl, edge-face, etc.) do NOT
+      // check discrete targetPoints because the dimension dynamically anchors to the visible slice.
+      const isEntityToEntity = (entry.targetFaces && entry.targetFaces.length >= 2) ||
+                               (entry.targetEdges && entry.targetEdges.length >= 2) ||
+                               (entry.targetCylinders && entry.targetCylinders.length >= 2) ||
+                               (entry.targetFaces && entry.targetEdges && entry.targetFaces.length > 0 && entry.targetEdges.length > 0) ||
+                               (entry.targetFaces && entry.targetCylinders && entry.targetFaces.length > 0 && entry.targetCylinders.length > 0) ||
+                               (entry.targetEdges && entry.targetCylinders && entry.targetEdges.length > 0 && entry.targetCylinders.length > 0) ||
+                               (entry.type === 'planes' || entry.type === 'planes_angle' || entry.type === 'lines_parallel' || entry.type === 'lines_angle' || entry.type === 'cylinders_distance' || entry.type === 'cylinder_single' || entry.type === 'edge_single' || entry.type === 'edge_cut_single');
+
+      if (!isEntityToEntity) {
+        const points = entry.targetPoints;
+        if (points && points.length > 0) {
+          for (let i = 0; i < points.length; i++) {
+            const pt = points[i];
+            if (pt && plane.distanceToPoint(pt) < -0.005) {
+              return false;
+            }
+          }
+        }
+        if (entry.worldPos && plane.distanceToPoint(entry.worldPos) < -0.005) {
+          return false;
+        }
       }
     }
 
@@ -4643,9 +4976,23 @@ export class MeasurementTool {
       if (firstMesh && this.viewer && typeof this.viewer.isMeshVisibleInView === 'function' && !this.viewer.isMeshVisibleInView(firstMesh)) {
         firstVisible = false;
       }
-      if (firstPt && this.viewer && this.viewer.sectionActive && this.viewer.sectionPlane) {
-        if (this.viewer.sectionPlane.distanceToPoint(firstPt) < -0.005) {
-          firstVisible = false;
+      if (this.viewer && this.viewer.sectionActive && this.viewer.sectionPlane) {
+        if (this.firstSelection.faceData) {
+          if (!this.isFaceVisibleUnderPlane(this.firstSelection.faceData, this.viewer.sectionPlane)) {
+            firstVisible = false;
+          }
+        } else if (this.firstSelection.edgeData) {
+          if (!this.isEdgeVisibleUnderPlane(this.firstSelection.edgeData, this.viewer.sectionPlane)) {
+            firstVisible = false;
+          }
+        } else if (this.firstSelection.cylData) {
+          if (!this.isCylinderVisibleUnderPlane(this.firstSelection.cylData, this.viewer.sectionPlane)) {
+            firstVisible = false;
+          }
+        } else if (firstPt) {
+          if (this.viewer.sectionPlane.distanceToPoint(firstPt) < -0.005) {
+            firstVisible = false;
+          }
         }
       }
       if (this.selectionGroup) this.selectionGroup.visible = firstVisible;
@@ -4674,10 +5021,15 @@ export class MeasurementTool {
 
       let canShow = badge.measureVisible !== false;
 
-      // Check if badge anchor itself is clipped away by cutting plane
+      // Check if badge anchor itself is clipped away by cutting plane (only for badges without target CAD entities)
       if (canShow && this.viewer && this.viewer.sectionActive && this.viewer.sectionPlane) {
-        if (this.viewer.sectionPlane.distanceToPoint(badge.worldPos) < -0.005) {
-          canShow = false;
+        const hasEntities = (badge.targetFaces && badge.targetFaces.length > 0) ||
+                            (badge.targetEdges && badge.targetEdges.length > 0) ||
+                            (badge.targetCylinders && badge.targetCylinders.length > 0);
+        if (!hasEntities) {
+          if (this.viewer.sectionPlane.distanceToPoint(badge.worldPos) < -0.005) {
+            canShow = false;
+          }
         }
       }
 
