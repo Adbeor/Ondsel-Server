@@ -305,15 +305,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           @dblclick="resetPanelPos('section')"
         >
           <div class="d-flex justify-space-between align-center">
-            <div class="d-flex align-center drag-title-area text-truncate">
-              <v-icon size="18" color="medium-emphasis" class="mr-1 drag-handle-icon">
+            <div class="d-flex align-center drag-title-area text-truncate" style="min-width: 0; flex: 1;">
+              <v-icon size="18" color="medium-emphasis" class="mr-1 flex-shrink-0 drag-handle-icon">
                 mdi-drag-vertical
                 <v-tooltip activator="parent" location="top">Arrastrar para mover panel • Doble clic para restablecer</v-tooltip>
               </v-icon>
-              <v-icon color="primary" class="mr-2">mdi-vector-intersection</v-icon>
-              <span class="text-subtitle-2 font-weight-bold">Análisis de Sección</span>
-              <v-chip v-if="!sectionPanelCollapsed" size="x-small" color="success" class="ml-2 font-weight-medium" variant="tonal">Activo</v-chip>
-              <v-chip v-else size="x-small" color="primary" class="ml-2 font-weight-bold" variant="flat">
+              <v-icon color="primary" class="mr-1 flex-shrink-0">mdi-vector-intersection</v-icon>
+              <span v-if="!sectionPanelCollapsed" class="status-indicator-dot mr-2" title="Herramienta activa"></span>
+              <span class="text-subtitle-2 font-weight-bold text-truncate">{{ minimalistMode ? 'Sección' : 'Análisis de Sección' }}</span>
+              <v-chip v-if="sectionPanelCollapsed" size="x-small" color="primary" class="ml-2 font-weight-bold flex-shrink-0" variant="flat">
                 {{ sectionAxis.toUpperCase() }}: {{ (sectionOffset || 0).toFixed(1) }} mm
               </v-chip>
             </div>
@@ -322,7 +322,22 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 icon
                 variant="text"
                 size="x-small"
-                class="mr-1"
+                density="compact"
+                class="mr-0.5"
+                :color="minimalistMode ? 'primary' : undefined"
+                @click.stop="toggleMinimalistMode"
+              >
+                <v-icon size="16">{{ minimalistMode ? 'mdi-unfold-more-horizontal' : 'mdi-unfold-less-horizontal' }}</v-icon>
+                <v-tooltip activator="parent" location="top">
+                  {{ minimalistMode ? 'Modo minimalista activo (mostrar opciones avanzadas)' : 'Activar modo minimalista (solo lo esencial)' }}
+                </v-tooltip>
+              </v-btn>
+              <v-btn
+                icon
+                variant="text"
+                size="x-small"
+                density="compact"
+                class="mr-0.5"
                 @click.stop="togglePanelCollapse('section')"
               >
                 <v-icon size="16">{{ sectionPanelCollapsed ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
@@ -331,20 +346,22 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 </v-tooltip>
               </v-btn>
               <v-btn
-                icon="mdi-power"
+                icon
                 variant="text"
                 size="x-small"
+                density="compact"
                 color="error"
-                class="mr-1"
+                class="mr-0.5"
                 @click="deactivateSection"
               >
                 <v-icon size="16">mdi-power</v-icon>
                 <v-tooltip activator="parent" location="top">Desactivar y quitar corte</v-tooltip>
               </v-btn>
               <v-btn
-                icon="mdi-close"
+                icon
                 variant="text"
                 size="x-small"
+                density="compact"
                 @click="closePanel"
               >
                 <v-icon size="16">mdi-close</v-icon>
@@ -357,7 +374,72 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         <v-expand-transition>
           <div v-show="!sectionPanelCollapsed">
             <v-card-text class="pt-2 pb-3">
-              <!-- Eje de corte -->
+              <!-- VISTA MINIMALISTA: solo eje, slider y botones principales -->
+              <template v-if="minimalistMode">
+                <v-btn-toggle
+                  v-model="sectionAxis"
+                  mandatory
+                  density="compact"
+                  color="primary"
+                  class="w-100 mb-2"
+                  @update:model-value="onAxisChange"
+                >
+                  <v-btn value="x" class="flex-grow-1" size="small">Plano X</v-btn>
+                  <v-btn value="y" class="flex-grow-1" size="small">Plano Y</v-btn>
+                  <v-btn value="z" class="flex-grow-1" size="small">Plano Z</v-btn>
+                </v-btn-toggle>
+
+                <div class="d-flex align-center justify-space-between mb-1">
+                  <span class="text-caption font-weight-medium text-medium-emphasis">Desplazamiento</span>
+                  <v-chip size="x-small" color="primary" variant="flat" class="font-weight-bold font-monospace">
+                    {{ Number(sectionOffset).toFixed(1) }} mm
+                  </v-chip>
+                </div>
+                <v-slider
+                  v-model="sectionOffset"
+                  :min="sectionMin"
+                  :max="sectionMax"
+                  :step="sectionStep"
+                  density="compact"
+                  color="primary"
+                  hide-details
+                  class="mb-2"
+                  @update:model-value="onOffsetChange"
+                />
+
+                <div class="d-flex justify-space-between align-center">
+                  <v-btn
+                    size="x-small"
+                    :variant="sectionInvert ? 'flat' : 'outlined'"
+                    :color="sectionInvert ? 'primary' : undefined"
+                    prepend-icon="mdi-swap-horizontal"
+                    @click="toggleInvert"
+                  >
+                    Invertir
+                  </v-btn>
+                  <v-btn
+                    size="x-small"
+                    variant="text"
+                    prepend-icon="mdi-restart"
+                    @click="resetToCenter"
+                  >
+                    Centrar
+                  </v-btn>
+                  <v-btn
+                    size="x-small"
+                    variant="text"
+                    color="primary"
+                    prepend-icon="mdi-tune"
+                    @click="toggleMinimalistMode"
+                  >
+                    + Ajustes
+                  </v-btn>
+                </div>
+              </template>
+
+              <!-- VISTA COMPLETA: todos los controles avanzados -->
+              <template v-else>
+                <!-- Eje de corte -->
           <div class="text-caption font-weight-bold text-medium-emphasis mb-1">PLANO DE CORTE</div>
           <v-btn-toggle
             v-model="sectionAxis"
@@ -495,7 +577,21 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             color="primary"
             @update:model-value="applySection"
           ></v-checkbox>
-        </v-card-text>
+
+          <div class="text-right mt-2">
+                  <v-btn
+                    size="x-small"
+                    variant="text"
+                    color="primary"
+                    density="compact"
+                    prepend-icon="mdi-unfold-less-horizontal"
+                    @click="toggleMinimalistMode"
+                  >
+                    Modo minimalista
+                  </v-btn>
+                </div>
+              </template>
+            </v-card-text>
       </div>
     </v-expand-transition>
   </v-card>
@@ -517,15 +613,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           @dblclick="resetPanelPos('measure')"
         >
           <div class="d-flex justify-space-between align-center">
-            <div class="d-flex align-center drag-title-area text-truncate">
-              <v-icon size="18" color="medium-emphasis" class="mr-1 drag-handle-icon">
+            <div class="d-flex align-center drag-title-area text-truncate" style="min-width: 0; flex: 1;">
+              <v-icon size="18" color="medium-emphasis" class="mr-1 flex-shrink-0 drag-handle-icon">
                 mdi-drag-vertical
                 <v-tooltip activator="parent" location="top">Arrastrar para mover panel • Doble clic para restablecer</v-tooltip>
               </v-icon>
-              <v-icon color="primary" class="mr-2">mdi-ruler-square</v-icon>
-              <span class="text-subtitle-2 font-weight-bold">Medición CAD</span>
-              <v-chip v-if="!measurePanelCollapsed" size="x-small" color="primary" class="ml-2 font-weight-medium" variant="tonal">Activo</v-chip>
-              <v-chip v-else-if="currentMeasurement" size="x-small" color="primary" class="ml-2 font-weight-bold" variant="flat">
+              <v-icon color="primary" class="mr-1 flex-shrink-0">mdi-ruler-square</v-icon>
+              <span v-if="!measurePanelCollapsed" class="status-indicator-dot mr-2" title="Herramienta activa"></span>
+              <span class="text-subtitle-2 font-weight-bold text-truncate">{{ minimalistMode ? 'Medición' : 'Medición CAD' }}</span>
+              <v-chip v-if="measurePanelCollapsed && currentMeasurement" size="x-small" color="primary" class="ml-2 font-weight-bold flex-shrink-0" variant="flat">
                 {{ currentMeasurement.primaryValue }}
               </v-chip>
             </div>
@@ -534,7 +630,22 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 icon
                 variant="text"
                 size="x-small"
-                class="mr-1"
+                density="compact"
+                class="mr-0.5"
+                :color="minimalistMode ? 'primary' : undefined"
+                @click.stop="toggleMinimalistMode"
+              >
+                <v-icon size="16">{{ minimalistMode ? 'mdi-unfold-more-horizontal' : 'mdi-unfold-less-horizontal' }}</v-icon>
+                <v-tooltip activator="parent" location="top">
+                  {{ minimalistMode ? 'Modo minimalista activo (mostrar opciones completas)' : 'Activar modo minimalista (solo lo esencial)' }}
+                </v-tooltip>
+              </v-btn>
+              <v-btn
+                icon
+                variant="text"
+                size="x-small"
+                density="compact"
+                class="mr-0.5"
                 @click.stop="togglePanelCollapse('measure')"
               >
                 <v-icon size="16">{{ measurePanelCollapsed ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
@@ -546,7 +657,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 icon
                 variant="text"
                 size="x-small"
-                class="mr-1"
+                density="compact"
+                class="mr-0.5"
                 :color="measureXray ? 'warning' : undefined"
                 @click="toggleMeasureXray"
               >
@@ -556,11 +668,12 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 </v-tooltip>
               </v-btn>
               <v-btn
-                v-if="currentMeasurement"
+                v-if="currentMeasurement && !minimalistMode"
                 icon
                 variant="text"
                 size="x-small"
-                class="mr-1"
+                density="compact"
+                class="mr-0.5"
                 :color="copiedTarget === 'all' ? 'success' : undefined"
                 @click="copyAllMeasurement"
               >
@@ -573,8 +686,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 icon
                 variant="text"
                 size="x-small"
+                density="compact"
                 color="error"
-                class="mr-1"
+                class="mr-0.5"
                 @click="deactivateMeasurement"
               >
                 <v-icon size="16">mdi-power</v-icon>
@@ -584,6 +698,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 icon
                 variant="text"
                 size="x-small"
+                density="compact"
                 @click="measurePanelOpen = false"
               >
                 <v-icon size="16">mdi-close</v-icon>
@@ -596,7 +711,110 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         <v-expand-transition>
           <div v-show="!measurePanelCollapsed">
             <v-card-text class="pt-2 pb-3">
-              <!-- Modo de medición -->
+              <!-- VISTA MINIMALISTA: solo modo, valor principal y acción esencial -->
+              <template v-if="minimalistMode">
+                <v-btn-toggle
+                  v-model="measureMode"
+                  mandatory
+                  density="compact"
+                  color="primary"
+                  class="w-100 mb-2"
+                  @update:model-value="onMeasureModeChange"
+                >
+                  <v-btn value="smart" class="flex-grow-1 px-1" size="x-small">Auto</v-btn>
+                  <v-btn value="planes" class="flex-grow-1 px-1" size="x-small">Planos</v-btn>
+                  <v-btn value="lines" class="flex-grow-1 px-1" size="x-small">Líneas</v-btn>
+                  <v-btn value="radius" class="flex-grow-1 px-1" size="x-small">Radio</v-btn>
+                  <v-btn value="distance" class="flex-grow-1 px-1" size="x-small">3D</v-btn>
+                </v-btn-toggle>
+
+                <!-- Prompt minimalista si no hay medición -->
+                <div
+                  v-if="!currentMeasurement"
+                  class="pa-2 rounded d-flex align-center justify-space-between mb-2"
+                  style="background-color: rgba(var(--v-theme-surface-soft), 0.85); border: 1px solid rgba(var(--v-theme-on-surface), 0.1);"
+                >
+                  <div class="d-flex align-center text-truncate mr-1">
+                    <v-icon size="16" color="primary" class="mr-1 flex-shrink-0">mdi-cursor-default-click</v-icon>
+                    <span class="text-caption font-weight-medium text-truncate" :title="measurePrompt || getSelectionPrompt()">
+                      {{ firstSelectionSnap ? 'P1 fijado • Clic en P2' : (measurePrompt || getSelectionPrompt()) }}
+                    </span>
+                  </div>
+                  <v-chip v-if="firstSelectionSnap" size="x-small" color="primary" variant="flat" class="font-weight-bold">1/2</v-chip>
+                  <v-chip v-else-if="measureMode === 'radius' && radiusPointsCount > 0" size="x-small" color="primary" variant="flat" class="font-weight-bold">{{ radiusPointsCount }}/3</v-chip>
+                </div>
+
+                <!-- Resultado minimalista si hay medición activa -->
+                <div
+                  v-else
+                  class="pa-2 rounded mb-2"
+                  style="background-color: rgba(var(--v-theme-primary), 0.08); border: 1px solid rgba(var(--v-theme-primary), 0.25);"
+                >
+                  <div class="d-flex justify-space-between align-center mb-1">
+                    <span class="text-caption font-weight-bold text-medium-emphasis text-uppercase text-truncate" style="font-size: 11px !important;">
+                      {{ currentMeasurement.title }}
+                    </span>
+                    <span v-if="currentMeasurement.secondaryValue" class="text-caption text-medium-emphasis font-monospace" style="font-size: 11px !important;">
+                      {{ currentMeasurement.secondaryValue }}
+                    </span>
+                  </div>
+                  <div class="d-flex justify-space-between align-center">
+                    <div class="text-h6 font-weight-bold" style="color: rgb(var(--v-theme-primary)); line-height: 1.1;">
+                      {{ currentMeasurement.primaryValue }}
+                    </div>
+                    <div class="d-flex align-center">
+                      <v-btn
+                        icon
+                        variant="tonal"
+                        size="x-small"
+                        color="primary"
+                        class="mr-1"
+                        @click="copyMeasurementValue(currentMeasurement.primaryValue, 'primary')"
+                      >
+                        <v-icon size="14">{{ copiedTarget === 'primary' ? 'mdi-check' : 'mdi-content-copy' }}</v-icon>
+                        <v-tooltip activator="parent" location="top">Copiar valor</v-tooltip>
+                      </v-btn>
+                      <v-btn
+                        icon
+                        variant="text"
+                        size="x-small"
+                        color="error"
+                        @click="clearAllMeasurements"
+                      >
+                        <v-icon size="14">mdi-trash-can-outline</v-icon>
+                        <v-tooltip activator="parent" location="top">Borrar</v-tooltip>
+                      </v-btn>
+                    </div>
+                  </div>
+                </div>
+
+                <div class="d-flex justify-space-between align-center">
+                  <v-btn
+                    size="x-small"
+                    variant="flat"
+                    color="primary"
+                    prepend-icon="mdi-plus"
+                    class="text-none font-weight-medium px-2"
+                    @click="commitAndNewMeasurement"
+                  >
+                    Fijar / Otra
+                  </v-btn>
+                  <v-btn
+                    size="x-small"
+                    variant="text"
+                    color="primary"
+                    prepend-icon="mdi-tune"
+                    class="text-none font-weight-medium px-2"
+                    @click="toggleMinimalistMode"
+                  >
+                    + Desglose
+                  </v-btn>
+                </div>
+              </template>
+
+              <!-- VISTA COMPLETA: con desgloses, lista de cotas y persistencia -->
+              <template v-else>
+                <!-- Modo de medición -->
           <div class="text-caption font-weight-bold text-medium-emphasis mb-1">TIPO DE MEDICIÓN</div>
           <v-btn-toggle
             v-model="measureMode"
@@ -811,7 +1029,21 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               </v-list-item>
             </v-list>
           </div>
-        </v-card-text>
+
+          <div class="text-right mt-2">
+            <v-btn
+              size="x-small"
+              variant="text"
+              color="primary"
+              density="compact"
+              prepend-icon="mdi-unfold-less-horizontal"
+              @click="toggleMinimalistMode"
+            >
+              Modo minimalista
+            </v-btn>
+          </div>
+        </template>
+      </v-card-text>
       </div>
     </v-expand-transition>
   </v-card>
@@ -1191,6 +1423,7 @@ export default {
     isDraggingPanel: null,
     panelZIndices: { measure: 15, section: 15 },
     highestPanelZIndex: 15,
+    minimalistMode: (typeof localStorage !== 'undefined' && localStorage.getItem('ondsel_minimalist_mode') === 'true') || false,
   }),
   computed: {
     viewport3d: vm => vm.$refs.modelViewer,
@@ -1926,6 +2159,18 @@ export default {
       });
     },
 
+    toggleMinimalistMode() {
+      this.minimalistMode = !this.minimalistMode;
+      try {
+        localStorage.setItem('ondsel_minimalist_mode', this.minimalistMode ? 'true' : 'false');
+      } catch (e) {}
+      this.$nextTick(() => {
+        setTimeout(() => {
+          this.clampPanelPositions();
+        }, 150);
+      });
+    },
+
     startDragPanel(event, panelType) {
       if (event.button !== 0 && event.pointerType === 'mouse') return;
       if (event.target && event.target.closest('button, input, select, textarea, .v-btn, .v-switch, .v-btn-toggle')) {
@@ -2019,8 +2264,10 @@ export default {
       const isDragging = this.isDraggingPanel === 'section';
       const base = {
         position: 'absolute',
-        width: '350px',
+        width: this.minimalistMode ? '320px' : '360px',
         maxWidth: 'calc(100vw - 32px)',
+        maxHeight: 'calc(100vh - 100px)',
+        overflowY: 'auto',
         zIndex: this.panelZIndices?.section || 15,
         backdropFilter: 'blur(12px)',
         backgroundColor: 'rgba(var(--v-theme-surface), 0.95)',
@@ -2047,8 +2294,10 @@ export default {
       const isDragging = this.isDraggingPanel === 'measure';
       const base = {
         position: 'absolute',
-        width: '390px',
+        width: this.minimalistMode ? '340px' : '400px',
         maxWidth: 'calc(100vw - 32px)',
+        maxHeight: 'calc(100vh - 100px)',
+        overflowY: 'auto',
         zIndex: this.panelZIndices?.measure || 15,
         backdropFilter: 'blur(12px)',
         backgroundColor: 'rgba(var(--v-theme-surface), 0.96)',
@@ -2064,8 +2313,10 @@ export default {
         base.bottom = 'auto';
       } else {
         const isSectionAtDefault = this.sectionPanelOpen && (!this.sectionPanelPos || this.sectionPanelPos.x === null);
+        const desiredLeft = isSectionAtDefault ? (this.minimalistMode ? 344 : 380) : 24;
+        const maxDefaultLeft = Math.max(24, (typeof window !== 'undefined' ? window.innerWidth : 1280) - (this.minimalistMode ? 356 : 416));
         base.bottom = '84px';
-        base.left = isSectionAtDefault ? '390px' : '24px';
+        base.left = `${Math.min(desiredLeft, maxDefaultLeft)}px`;
         base.top = 'auto';
       }
 
@@ -2077,6 +2328,15 @@ export default {
 </script>
 
 <style scoped>
+.status-indicator-dot {
+  width: 8px;
+  height: 8px;
+  border-radius: 50%;
+  background-color: #4caf50;
+  box-shadow: 0 0 8px rgba(76, 175, 80, 0.8);
+  display: inline-block;
+  flex-shrink: 0;
+}
 .measurement-detail-row:hover {
   background-color: rgba(var(--v-theme-primary), 0.12) !important;
 }
