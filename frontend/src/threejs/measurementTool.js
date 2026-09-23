@@ -2395,35 +2395,72 @@ export class MeasurementTool {
             const firstHitDist = validHits.length > 0 ? validHits[0].distance : Infinity;
             if (firstHitDist >= cutDist - 1.0) {
               const threshold = this.getSnapThreshold(hitPlanePt);
+              const isRadiusMode = (this.mode === 'radius');
+              const hitMesh = validHits.length > 0 ? validHits[0].object : null;
+
+              let bestCirc = null;
+              let bestScore = Infinity;
+              let bestIsNearRim = false;
+              let bestRimPt = null;
+
               for (let c = 0; c < cutCircles.length; c++) {
                 const circ = cutCircles[c];
                 const distToCenter = hitPlanePt.distanceTo(circ.center);
                 const distToRim = Math.abs(distToCenter - circ.radius);
-
-                // In radius mode, snap anywhere inside the circular slice or near circumference
-                // In other modes, snap within threshold of circumference
-                const isRadiusMode = (this.mode === 'radius');
                 const isNearCircumference = distToRim <= threshold * 1.5;
-                const isInsideCap = isRadiusMode && (distToCenter <= circ.radius + threshold);
+                const isInside = distToCenter <= (circ.radius + 1e-4);
+                const isMeshMatch = (hitMesh && circ.mesh === hitMesh);
 
-                if (isNearCircumference || isInsideCap) {
-                  const radVec = hitPlanePt.clone().sub(circ.center);
-                  const radLen = radVec.length();
-                  const rimPt = radLen > 1e-4
-                    ? circ.center.clone().addScaledVector(radVec.normalize(), circ.radius)
-                    : circ.center.clone().addScaledVector(circ.U, circ.radius);
-
-                  return {
-                    type: 'circle',
-                    point: isNearCircumference ? rimPt : circ.center.clone(),
-                    normal: circ.axis.clone(),
-                    cutCircle: circ,
-                    cylData: circ,
-                    edgeData: circ.pathEdges && circ.pathEdges.length > 0 ? circ.pathEdges[0] : null,
-                    rawHit: { object: circ.mesh, point: hitPlanePt.clone(), faceIndex: 0 },
-                    isCutCircle: true
-                  };
+                if (isNearCircumference) {
+                  // User is aiming at a circular rim / edge
+                  // Primary metric: distance to rim (closer rim wins)
+                  // If rims are almost identical (e.g. tight clearance), matching the hit mesh gives tie-break bonus
+                  const meshBonus = isMeshMatch ? -0.15 * threshold : 0;
+                  const score = distToRim + meshBonus;
+                  if (bestCirc === null || !bestIsNearRim || score < bestScore) {
+                    bestCirc = circ;
+                    bestScore = score;
+                    bestIsNearRim = true;
+                    const radVec = hitPlanePt.clone().sub(circ.center);
+                    const radLen = radVec.length();
+                    bestRimPt = radLen > 1e-4
+                      ? circ.center.clone().addScaledVector(radVec.normalize(), circ.radius)
+                      : circ.center.clone().addScaledVector(circ.U, circ.radius);
+                  }
+                } else if (isRadiusMode && !bestIsNearRim) {
+                  // User is hovering inside circular disk in radius mode
+                  if (isInside) {
+                    // When hovering inside concentric disks (e.g. pin inside hole),
+                    // the cursor is over the innermost enclosing disk (the pin!).
+                    // Mesh match confirms the exact part under the ray.
+                    const score = (isMeshMatch ? 0 : 100000) + circ.radius;
+                    if (bestCirc === null || score < bestScore) {
+                      bestCirc = circ;
+                      bestScore = score;
+                      bestIsNearRim = false;
+                    }
+                  } else if (distToCenter <= circ.radius + threshold * 0.75) {
+                    const score = 200000 + distToRim;
+                    if (bestCirc === null || score < bestScore) {
+                      bestCirc = circ;
+                      bestScore = score;
+                      bestIsNearRim = false;
+                    }
+                  }
                 }
+              }
+
+              if (bestCirc) {
+                return {
+                  type: 'circle',
+                  point: bestIsNearRim && bestRimPt ? bestRimPt : bestCirc.center.clone(),
+                  normal: bestCirc.axis.clone(),
+                  cutCircle: bestCirc,
+                  cylData: bestCirc,
+                  edgeData: bestCirc.pathEdges && bestCirc.pathEdges.length > 0 ? bestCirc.pathEdges[0] : null,
+                  rawHit: { object: bestCirc.mesh, point: hitPlanePt.clone(), faceIndex: 0 },
+                  isCutCircle: true
+                };
               }
             }
           }
@@ -2828,24 +2865,43 @@ export class MeasurementTool {
     const deltaY = Math.abs(C2.y - C1.y);
     const deltaZ = Math.abs(C2.z - C1.z);
 
+    const r1 = cyl1.radius;
+    const r2 = cyl2.radius;
+    const deltaDia = Math.abs(cyl1.diameter - cyl2.diameter);
+    const axisDist = isParallel ? closest.distance : directDist;
+
+    // Check if one cylinder is nested/concentric inside the other (e.g. pin inside hole)
+    const isNested = isParallel && (axisDist < Math.max(r1, r2));
+    const isConcentric = isParallel && (axisDist < 0.15);
+    const radialClearance = Math.abs(r1 - r2) - axisDist;
+
     // Wall clearance: distance between closest cylinder surfaces
-    const wallClearance = Math.max(0, closest.distance - cyl1.radius - cyl2.radius);
-    const primaryDist = isParallel ? closest.distance : directDist;
+    const wallClearance = isNested ? Math.max(0, radialClearance) : Math.max(0, axisDist - r1 - r2);
+    const primaryDist = isNested ? (isConcentric ? Math.max(0, radialClearance) : axisDist) : (isParallel ? closest.distance : directDist);
+
+    const fitType = isNested
+      ? (r1 < r2 ? 'Cuerpo 1 (Eje/Pin interior) en Cuerpo 2 (Orificio exterior)' : 'Cuerpo 2 (Eje/Pin interior) en Cuerpo 1 (Orificio exterior)')
+      : 'Cilindros Separados (Lado a lado)';
 
     const measurement = {
-      type: 'cylinders_distance',
-      title: 'Distancia entre Cilindros / Orificios',
+      type: isConcentric ? 'cylinders_concentric' : (isNested ? 'cylinders_nested' : 'cylinders_distance'),
+      title: isConcentric ? 'Encaje Cilíndrico Concéntrico (Eje en Orificio)' : (isNested ? 'Encaje Cilíndrico con Excentricidad' : 'Distancia entre Cilindros / Orificios'),
       distance: primaryDist,
       unit: 'mm',
-      primaryValue: `${primaryDist.toFixed(2)} mm (Centros)`,
-      secondaryValue: `Pared mín.: ${wallClearance.toFixed(2)} mm | Ejes ${isParallel ? 'Paralelos (0.0°)' : `${closest.angleDeg.toFixed(1)}°`}`,
+      primaryValue: isNested
+        ? (isConcentric ? `Holgura radial: ${radialClearance.toFixed(2)} mm (ΔØ ${deltaDia.toFixed(2)} mm)` : `Holgura mín.: ${Math.max(0, radialClearance).toFixed(2)} mm (Ejes: ${axisDist.toFixed(2)} mm)`)
+        : `${primaryDist.toFixed(2)} mm (Centros)`,
+      secondaryValue: isNested
+        ? `Ø1: ${cyl1.diameter.toFixed(2)} mm | Ø2: ${cyl2.diameter.toFixed(2)} mm | ${isConcentric ? 'Ejes concéntricos (0.00 mm)' : `Excentricidad: ${axisDist.toFixed(2)} mm`}`
+        : `Pared mín.: ${wallClearance.toFixed(2)} mm | Ejes ${isParallel ? 'Paralelos (0.0°)' : `${closest.angleDeg.toFixed(1)}°`}`,
       targetMeshes: [cyl1.mesh, cyl2.mesh].filter(Boolean),
       targetPoints: [C1, C2].filter(Boolean),
       details: [
-        { label: 'Distancia entre Centros 3D', value: `${directDist.toFixed(2)} mm` },
-        { label: 'Distancia Perpendicular entre Ejes', value: `${closest.distance.toFixed(2)} mm` },
-        { label: 'Espesor Mínimo de Pared (Gap)', value: `${wallClearance.toFixed(2)} mm` },
-        { label: 'Relación de Ejes', value: isParallel ? 'Paralelos (0.0°)' : `Ángulo: ${closest.angleDeg.toFixed(1)}°` },
+        { label: 'Relación / Ajuste', value: isConcentric ? 'Concéntricos (Ejes coincidentes 0.0°)' : (isNested ? 'Encaje con Excentricidad' : (isParallel ? 'Paralelos' : `Ángulo: ${closest.angleDeg.toFixed(1)}°`)) },
+        { label: 'Holgura / Juego Radial', value: isNested ? `${Math.max(0, radialClearance).toFixed(2)} mm (por lado)` : `${wallClearance.toFixed(2)} mm (entre paredes)` },
+        { label: 'Diferencia de Diámetros (ΔØ)', value: `Ø ${deltaDia.toFixed(2)} mm` },
+        { label: 'Distancia entre Ejes (Excentricidad)', value: `${axisDist.toFixed(2)} mm` },
+        { label: 'Tipo de Encaje', value: fitType },
         { label: cyl1.label || 'Cilindro 1', value: `Ø ${cyl1.diameter.toFixed(2)} mm (R: ${cyl1.radius.toFixed(2)} mm)` },
         { label: cyl2.label || 'Cilindro 2', value: `Ø ${cyl2.diameter.toFixed(2)} mm (R: ${cyl2.radius.toFixed(2)} mm)` },
         { label: 'Componente ΔX', value: `${deltaX.toFixed(2)} mm` },
@@ -2857,7 +2913,9 @@ export class MeasurementTool {
     };
 
     this.currentMeasurement = measurement;
-    this.statusPrompt = `Distancia entre centros: ${primaryDist.toFixed(2)} mm. Haz clic de nuevo para otra medición.`;
+    this.statusPrompt = isNested
+      ? `Encaje cilíndrico detectado: Holgura radial ${radialClearance.toFixed(2)} mm (ΔØ ${deltaDia.toFixed(2)} mm). Haz clic para otra medición.`
+      : `Distancia entre centros: ${primaryDist.toFixed(2)} mm. Haz clic de nuevo para otra medición.`;
     this.renderCylinderDimensionVisual(cyl1, cyl2, closest, C1, C2);
     this.emitUpdate();
   }
@@ -4495,13 +4553,17 @@ export class MeasurementTool {
     const C1 = C1_in || (cyl1.topCenter || cyl1.center);
     const C2 = C2_in || (cyl2.topCenter || cyl2.center);
     const minR = Math.min(cyl1.radius, cyl2.radius);
+    const maxR = Math.max(cyl1.radius, cyl2.radius);
 
-    // 1. Solid dimension rod connecting centers (proportional to cylinder size)
+    const isParallel = closest && (closest.isParallel || closest.angleDeg < 5.0);
+    const axisDist = isParallel ? closest.distance : C1.distanceTo(C2);
+    const isNested = isParallel && (axisDist < maxR);
+    const isConcentric = isParallel && (axisDist < 0.15);
+    const deltaDia = Math.abs(cyl1.diameter - cyl2.diameter);
+    const radialClearance = Math.abs(cyl1.radius - cyl2.radius) - axisDist;
+
+    // 1. Solid dimension rod connecting centers or concentric rims
     const rodR = Math.max(0.55, Math.min(0.95, minR * 0.035));
-    const dimLine = createThickLineMesh(C1, C2, rodR, this.getDimensionColor(), !this.xray, true);
-    group.add(dimLine);
-
-    // 2. End markers (crisp small CAD terminal dots, proportional to cylinder size)
     const markerR = Math.max(0.75, Math.min(1.4, minR * 0.045));
     const markerGeom = new THREE.SphereGeometry(markerR, 16, 16);
     const markerMat = new THREE.MeshBasicMaterial({
@@ -4514,26 +4576,47 @@ export class MeasurementTool {
     });
 
     const m1 = new THREE.Mesh(markerGeom, markerMat);
-    m1.position.copy(C1);
     m1.userData.isDimensionLine = true;
     m1.renderOrder = 3021;
-    group.add(m1);
 
     const m2 = new THREE.Mesh(markerGeom, markerMat);
-    m2.position.copy(C2);
     m2.userData.isDimensionLine = true;
     m2.renderOrder = 3021;
-    group.add(m2);
 
+    let badgePos = new THREE.Vector3().addVectors(C1, C2).multiplyScalar(0.5);
+    let badgeText = `Centros: ${axisDist.toFixed(2)} mm`;
+
+    if (isConcentric) {
+      // Connect inner cylinder rim to outer cylinder rim along radial basis vector U
+      const uDir = (cyl1.U || cyl2.U || new THREE.Vector3(1, 0, 0)).clone().normalize();
+      const ptInner = C1.clone().addScaledVector(uDir, minR);
+      const ptOuter = C1.clone().addScaledVector(uDir, maxR);
+      const dimLine = createThickLineMesh(ptInner, ptOuter, rodR, this.getDimensionColor(), !this.xray, true);
+      group.add(dimLine);
+      m1.position.copy(ptInner);
+      m2.position.copy(ptOuter);
+      badgePos = ptInner.clone().add(ptOuter).multiplyScalar(0.5);
+      badgeText = `Holgura: ${radialClearance.toFixed(2)} mm (ΔØ ${deltaDia.toFixed(2)} mm)`;
+    } else {
+      const dimLine = createThickLineMesh(C1, C2, rodR, this.getDimensionColor(), !this.xray, true);
+      group.add(dimLine);
+      m1.position.copy(C1);
+      m2.position.copy(C2);
+      if (isNested) {
+        badgeText = `Holgura: ${Math.max(0, radialClearance).toFixed(2)} mm | Ejes: ${axisDist.toFixed(2)} mm`;
+      }
+    }
+
+    group.add(m1);
+    group.add(m2);
     this.visualsGroup.add(group);
 
-    // 3. Floating 3D Badge at center midpoint
-    const midpoint = new THREE.Vector3().addVectors(C1, C2).multiplyScalar(0.5);
-    const dist = C1.distanceTo(C2);
+    // 3. Floating 3D Badge
     this.badges = [{
       id: 'measure-main',
-      worldPos: midpoint.clone(),
-      text: `Centros: ${dist.toFixed(2)} mm`,
+      worldPos: badgePos.clone(),
+      text: badgeText,
+      targetCylinders: [cyl1, cyl2],
       screenX: 0,
       screenY: 0,
       visible: false
