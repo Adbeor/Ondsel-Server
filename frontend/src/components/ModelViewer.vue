@@ -92,7 +92,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         v-for="badge in measurementBadges"
         :key="badge.id"
         :id="'badge-' + badge.id"
-        v-show="badge.visible"
+        v-show="badge.visible && badge.measureVisible !== false"
         :style="{
           position: 'absolute',
           left: (badge.screenX + (badge.offsetX || 0)) + 'px',
@@ -133,7 +133,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
     <!-- Floating Persistent Cotas Indicator (visible when tool panel is closed but cotas exist) -->
     <v-chip
-      v-if="!measureActive && measurementBadges && measurementBadges.length > 0"
+      v-if="!measureActive && visibleMeasurementBadges && visibleMeasurementBadges.length > 0"
       color="primary"
       variant="elevated"
       elevation="4"
@@ -142,7 +142,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       style="position: absolute; bottom: 84px; left: 24px; z-index: 10; backdrop-filter: blur(8px);"
     >
       <v-icon start size="small">mdi-ruler</v-icon>
-      {{ measurementBadges.length }} {{ measurementBadges.length === 1 ? 'cota en pantalla' : 'cotas en pantalla' }}
+      {{ visibleMeasurementBadges.length }} {{ visibleMeasurementBadges.length === 1 ? 'cota en pantalla' : 'cotas en pantalla' }}
       <v-btn
         variant="text"
         size="x-small"
@@ -1005,6 +1005,10 @@ export default {
     viewerHeight: (vm) => vm.fullScreen ? window.innerHeight : window.innerHeight - 64,
     isDark() {
       return this.$vuetify?.theme?.global?.name === 'dark' || !!(this.$vuetify?.theme?.current?.dark);
+    },
+    visibleMeasurementBadges() {
+      if (!this.measurementBadges) return [];
+      return this.measurementBadges.filter(b => b.visible && b.measureVisible !== false);
     },
   },
   watch: {

@@ -215,10 +215,12 @@ export class Viewer {
     this.loadOBJ();
 
     this.onPointerDownHandler = this.onPointerDown.bind(this);
+    this.onPointerMoveHandler = this.onPointerMove.bind(this);
     this.onPointerUpHandler = this.onPointerUp.bind(this);
     this.onContextMenuHandler = this.onContextMenu.bind(this);
 
     this.viewport.addEventListener('pointerdown', this.onPointerDownHandler);
+    this.viewport.addEventListener('pointermove', this.onPointerMoveHandler);
     this.viewport.addEventListener('pointerup', this.onPointerUpHandler);
     this.viewport.addEventListener('contextmenu', this.onContextMenuHandler);
 
@@ -299,6 +301,21 @@ export class Viewer {
 
   initControls() {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this._isNavigating = false;
+    this._hasCameraMoved = false;
+
+    this.controls.addEventListener('start', () => {
+      this._isNavigating = true;
+    });
+    this.controls.addEventListener('change', () => {
+      this._hasCameraMoved = true;
+    });
+    this.controls.addEventListener('end', () => {
+      setTimeout(() => {
+        this._isNavigating = false;
+        this._hasCameraMoved = false;
+      }, 100);
+    });
   }
 
   addAxesHelper() {
@@ -328,12 +345,23 @@ export class Viewer {
   }
 
   onPointerDown(event) {
-    if (event.button === 0) {
-      this.pointerDownPos = { x: event.clientX, y: event.clientY };
-      this.pointerDownTime = performance.now();
-    } else if (event.button === 2) {
+    this.pointerDownPos = { x: event.clientX, y: event.clientY };
+    this.pointerDownTime = performance.now();
+    this.pointerDownButton = event.button;
+    this.pointerMoved = false;
+
+    if (event.button === 2) {
       this.rightPointerDownPos = { x: event.clientX, y: event.clientY };
       this.rightPointerDownTime = performance.now();
+    }
+  }
+
+  onPointerMove(event) {
+    if (this.pointerDownPos) {
+      const dist = Math.hypot(event.clientX - this.pointerDownPos.x, event.clientY - this.pointerDownPos.y);
+      if (dist > 5) {
+        this.pointerMoved = true;
+      }
     }
   }
 
@@ -346,13 +374,16 @@ export class Viewer {
     }
     if (event.button !== 0) return; // Only process left click
 
-    const dx = event.clientX - this.pointerDownPos.x;
-    const dy = event.clientY - this.pointerDownPos.y;
-    const dist = Math.hypot(dx, dy);
-    const dt = performance.now() - this.pointerDownTime;
+    const dt = performance.now() - (this.pointerDownTime || 0);
+    const pos = this.pointerDownPos || { x: event.clientX, y: event.clientY };
+    const dist = Math.hypot(event.clientX - pos.x, event.clientY - pos.y);
 
-    // Ignore if camera orbit/pan drag or prolonged click
-    if (dist > 5 || dt > 1200) return;
+    // Ignore if camera orbit/pan drag or prolonged click (mantener)
+    if (dist > 5 || dt > 350 || this.pointerMoved || this._isNavigating || this._hasCameraMoved) {
+      this.pointerDownPos = null;
+      return;
+    }
+    this.pointerDownPos = null;
 
     this.handleCanvasClick(event);
   }
@@ -386,12 +417,23 @@ export class Viewer {
       return;
     }
 
-    const dx = event.clientX - this.rightPointerDownPos.x;
-    const dy = event.clientY - this.rightPointerDownPos.y;
-    const dist = Math.hypot(dx, dy);
+    // Never trigger context menu on left button hold or drag! Only allow intentional right click (button 2).
+    if (this.pointerDownButton !== 2 && event.button !== 2) {
+      return;
+    }
 
-    // If mouse was dragged to pan camera, do not open context menu
-    if (dist > 5) return;
+    // If mouse was dragged to pan/orbit camera, do not open context menu
+    if (this._isNavigating || this._hasCameraMoved || this.pointerMoved) {
+      return;
+    }
+
+    const pos = this.rightPointerDownPos || this.pointerDownPos;
+    if (pos) {
+      const dist = Math.hypot(event.clientX - pos.x, event.clientY - pos.y);
+      if (dist > 5) return;
+    }
+    const dt = performance.now() - (this.rightPointerDownTime || this.pointerDownTime || 0);
+    if (dt > 500) return; // Ignore long hold
 
     if (!this.renderer || !this.renderer.domElement || !this.camera) return;
     const rect = this.renderer.domElement.getBoundingClientRect();
@@ -500,8 +542,15 @@ export class Viewer {
           if (mat.color) {
             if (isHighlighted) {
               mat.color.copy(highlightColor);
+              if (mat.emissive) {
+                if (!mat.userData.origEmissive) mat.userData.origEmissive = mat.emissive.clone();
+                mat.emissive.setHex(0x1a401a);
+              }
             } else {
               mat.color.copy(mat.userData.origColor || normalColor);
+              if (mat.emissive && mat.userData.origEmissive) {
+                mat.emissive.copy(mat.userData.origEmissive);
+              }
             }
           }
         };
@@ -798,6 +847,7 @@ export class Viewer {
     }
     if (this.viewport) {
       this.viewport.removeEventListener('pointerdown', this.onPointerDownHandler);
+      this.viewport.removeEventListener('pointermove', this.onPointerMoveHandler);
       this.viewport.removeEventListener('pointerup', this.onPointerUpHandler);
       this.viewport.removeEventListener('contextmenu', this.onContextMenuHandler);
     }

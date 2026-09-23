@@ -430,7 +430,7 @@ export function getOrthonormalBasis(normal) {
  * Creates a true 3D volumetric cylindrical rod between p1 and p2.
  * Clean, subtle CAD dimension lines.
  */
-export function createThickLineMesh(p1, p2, radius = 0.5, colorHex = 0x00b4d8, depthTest = true, isDimension = false) {
+export function createThickLineMesh(p1, p2, radius = 0.85, colorHex = 0x00b4d8, depthTest = true, isDimension = false) {
   const dir = new THREE.Vector3().subVectors(p2, p1);
   const length = dir.length();
   if (length < 1e-3) return new THREE.Group();
@@ -439,15 +439,16 @@ export function createThickLineMesh(p1, p2, radius = 0.5, colorHex = 0x00b4d8, d
   const mat = new THREE.MeshBasicMaterial({
     color: colorHex,
     depthTest: depthTest,
+    depthWrite: false, // Prevents z-fighting and self-occlusion with coplanar CAD faces
     polygonOffset: true,
-    polygonOffsetFactor: -1,
-    polygonOffsetUnits: -1
+    polygonOffsetFactor: isDimension ? -5 : -3,
+    polygonOffsetUnits: isDimension ? -5 : -3
   });
   const mesh = new THREE.Mesh(geom, mat);
   const midpoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
   mesh.position.copy(midpoint);
   mesh.quaternion.setFromUnitVectors(new THREE.Vector3(0, 1, 0), dir.clone().normalize());
-  mesh.renderOrder = 3020;
+  mesh.renderOrder = isDimension ? 3025 : 3020;
   if (isDimension) {
     mesh.userData.isDimensionLine = true;
   }
@@ -456,19 +457,19 @@ export function createThickLineMesh(p1, p2, radius = 0.5, colorHex = 0x00b4d8, d
 
 /**
  * Calculates adaptive ring ribbon half-width proportional to radius.
- * Proportional thickness: ~1.2% - 1.4% of radius.
- * Delicate floor (0.035 mm) so tiny holes don't collapse into giant solid blobs.
- * Clean ceiling (1.5 mm) so large cylinders don't become disproportionate.
+ * Proportional thickness: ~2.0% of radius.
+ * Solid floor (0.08 mm) so tiny holes remain crisp and visible.
+ * Clean ceiling (2.5 mm) so large cylinders don't become disproportionate.
  */
 export function getAdaptiveRingHalfWidth(radius, isHover = false) {
-  const prop = radius * 0.014;
-  const halfW = Math.max(0.035, Math.min(1.5, prop));
+  const prop = radius * 0.02;
+  const halfW = Math.max(0.08, Math.min(2.5, prop));
   return isHover ? halfW * 0.85 : halfW;
 }
 
 /**
  * Creates a smooth 3D ribbon ring (annular band) along a circle with adaptive physical width.
- * Clean, discrete circular rims.
+ * Clean, discrete circular rims that never vanish into coplanar surfaces.
  */
 export function createThickRingMesh(centerPt, U, V, radius, halfWidth = null, colorHex = 0x00b4d8, isHover = false, renderOrder = 3018, depthTest = true) {
   if (halfWidth === null || halfWidth === undefined) {
@@ -520,11 +521,12 @@ export function createThickRingMesh(centerPt, U, V, radius, halfWidth = null, co
     color: colorHex,
     side: THREE.DoubleSide,
     depthTest: depthTest,
+    depthWrite: false, // Prevents z-fighting
     transparent: true,
-    opacity: isHover ? 0.70 : 0.88,
+    opacity: isHover ? 0.85 : 0.95,
     polygonOffset: true,
-    polygonOffsetFactor: -1,
-    polygonOffsetUnits: -1
+    polygonOffsetFactor: -4,
+    polygonOffsetUnits: -4
   });
 
   const mesh = new THREE.Mesh(geom, mat);
@@ -1682,7 +1684,26 @@ export class MeasurementTool {
     this.keepMeasurementsOnExit = true;
 
     // Bound event handlers
-    this._onPointerMove = this.onPointerMove.bind(this);
+    this._pointerDownPos = null;
+    this._pointerDownTime = 0;
+    this._pointerMoved = false;
+
+    this._onPointerDown = (event) => {
+      if (event.button === 0) {
+        this._pointerDownPos = { x: event.clientX, y: event.clientY };
+        this._pointerDownTime = performance.now();
+        this._pointerMoved = false;
+      }
+    };
+    this._onPointerMove = (event) => {
+      if (this._pointerDownPos) {
+        const dist = Math.hypot(event.clientX - this._pointerDownPos.x, event.clientY - this._pointerDownPos.y);
+        if (dist > 5) {
+          this._pointerMoved = true;
+        }
+      }
+      this.onPointerMove(event);
+    };
     this._onClick = this.onClick.bind(this);
 
     this.isDarkTheme = !!(viewer && viewer.isDarkTheme);
@@ -1758,6 +1779,7 @@ export class MeasurementTool {
 
     const dom = this.renderer?.domElement;
     if (dom) {
+      dom.addEventListener('pointerdown', this._onPointerDown, false);
       dom.addEventListener('pointermove', this._onPointerMove, false);
       dom.addEventListener('click', this._onClick, false);
       dom.style.cursor = 'crosshair';
@@ -1798,10 +1820,13 @@ export class MeasurementTool {
 
     const dom = this.renderer?.domElement;
     if (dom) {
+      dom.removeEventListener('pointerdown', this._onPointerDown, false);
       dom.removeEventListener('pointermove', this._onPointerMove, false);
       dom.removeEventListener('click', this._onClick, false);
       dom.style.cursor = 'default';
     }
+    this._pointerDownPos = null;
+    this._pointerMoved = false;
 
     console.log('[CAD Measure] Deactivated. Standard navigation restored. Active saved cotas:', this.savedMeasurements.length);
     this.emitUpdate();
@@ -2006,6 +2031,9 @@ export class MeasurementTool {
 
     this.savedGroup.add(subGroup);
 
+    const targetMeshes = this.currentMeasurement.targetMeshes || [];
+    const targetPoints = this.currentMeasurement.targetPoints || [];
+
     const savedBadges = this.badges.map((b, idx) => ({
       ...b,
       id: `${mId}_b${idx}`,
@@ -2013,14 +2041,18 @@ export class MeasurementTool {
       worldPos: b.worldPos ? b.worldPos.clone() : new THREE.Vector3(),
       isSaved: true,
       offsetX: b.offsetX || 0,
-      offsetY: b.offsetY || 0
+      offsetY: b.offsetY || 0,
+      targetMeshes: targetMeshes,
+      targetPoints: targetPoints
     }));
 
     const savedEntry = {
       id: mId,
       data: { ...this.currentMeasurement, id: mId },
       group: subGroup,
-      badges: savedBadges
+      badges: savedBadges,
+      targetMeshes: targetMeshes,
+      targetPoints: targetPoints
     };
 
     this.savedMeasurements.push(savedEntry);
@@ -2145,6 +2177,12 @@ export class MeasurementTool {
   onClick(event) {
     if (!this.isActive || !this.viewer || !this.viewer.obj || !this.camera) return;
     if (event.button !== undefined && event.button !== 0) return; // Only left-click
+
+    // Reject drag, long-press hold, or camera navigation
+    if (this._pointerMoved) return;
+    const dt = performance.now() - (this._pointerDownTime || 0);
+    if (dt > 350) return;
+    if (this.viewer && (this.viewer._isNavigating || this.viewer._hasCameraMoved)) return;
 
     const now = Date.now();
     if (now - this.lastClickTime < 250) return; // Prevent double-triggering
@@ -2522,6 +2560,8 @@ export class MeasurementTool {
             unit: 'mm',
             primaryValue: `Ø ${circleData.diameter.toFixed(2)} mm`,
             secondaryValue: `Radio: ${circleData.radius.toFixed(2)} mm`,
+            targetMeshes: [snap.mesh || (snap.rawHit && snap.rawHit.object)].filter(Boolean),
+            targetPoints: [A, B, C].filter(Boolean),
             details: [
               { label: 'Diámetro (Ø)', value: `Ø ${circleData.diameter.toFixed(2)} mm` },
               { label: 'Radio (R)', value: `${circleData.radius.toFixed(2)} mm` },
@@ -2583,6 +2623,8 @@ export class MeasurementTool {
       unit: 'mm',
       primaryValue: `${primaryDist.toFixed(2)} mm (Centros)`,
       secondaryValue: `Pared mín.: ${wallClearance.toFixed(2)} mm | Ejes ${isParallel ? 'Paralelos (0.0°)' : `${closest.angleDeg.toFixed(1)}°`}`,
+      targetMeshes: [cyl1.mesh, cyl2.mesh].filter(Boolean),
+      targetPoints: [C1, C2].filter(Boolean),
       details: [
         { label: 'Distancia entre Centros 3D', value: `${directDist.toFixed(2)} mm` },
         { label: 'Distancia Perpendicular entre Ejes', value: `${closest.distance.toFixed(2)} mm` },
@@ -2878,6 +2920,16 @@ export class MeasurementTool {
       this.statusPrompt = `Ángulo entre caras: ${acuteAngleDeg.toFixed(1)}°. Haz clic de nuevo para otra medición.`;
     }
 
+    const targetMeshes = [
+      sel1.mesh || (sel1.rawHit && sel1.rawHit.object) || (sel1.faceData && sel1.faceData.mesh),
+      sel2.mesh || (sel2.rawHit && sel2.rawHit.object) || (sel2.faceData && sel2.faceData.mesh)
+    ].filter(Boolean);
+    const targetPoints = [P1, P2].filter(Boolean);
+    if (measurement) {
+      measurement.targetMeshes = targetMeshes;
+      measurement.targetPoints = targetPoints;
+    }
+
     this.currentMeasurement = measurement;
     this.renderPlanesDimensionVisual(P1, n1, P2, n2, isParallel, perpDist, directDist, acuteAngleDeg, signedDist);
     this.emitUpdate();
@@ -2887,6 +2939,7 @@ export class MeasurementTool {
    * Single cylinder/hole measurement details
    */
   computeSingleCylinderMeasurement(cylData) {
+    const centerPoint = cylData.topCenter || cylData.rimCenter || cylData.center || cylData.hitPoint;
     this.currentMeasurement = {
       type: 'cylinder_single',
       title: cylData.label || 'Orificio Cilíndrico',
@@ -2894,6 +2947,8 @@ export class MeasurementTool {
       unit: 'mm',
       primaryValue: `Ø ${cylData.diameter.toFixed(2)} mm`,
       secondaryValue: `Radio: ${cylData.radius.toFixed(2)} mm${cylData.depth > 0.05 ? ` | Profundidad: ${cylData.depth.toFixed(2)} mm` : ''}`,
+      targetMeshes: [cylData.mesh].filter(Boolean),
+      targetPoints: centerPoint ? [centerPoint.clone()] : [],
       details: [
         { label: 'Diámetro (Ø)', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
         { label: 'Radio (R)', value: `${cylData.radius.toFixed(2)} mm` },
@@ -2943,6 +2998,8 @@ export class MeasurementTool {
       unit: 'mm',
       primaryValue: `${edgeData.length.toFixed(2)} mm`,
       secondaryValue: `ΔX: ${deltaX.toFixed(1)} | ΔY: ${deltaY.toFixed(1)} | ΔZ: ${deltaZ.toFixed(1)} mm`,
+      targetMeshes: [edgeData.mesh].filter(Boolean),
+      targetPoints: [edgeData.p1, edgeData.p2].filter(Boolean),
       details: [
         { label: isCut ? 'Longitud de Arista de Corte' : 'Longitud de Arista', value: `${edgeData.length.toFixed(2)} mm` },
         { label: 'Tipo de Elemento', value: isCut ? 'Arista de Corte Dinámica (Sección Activa)' : 'Arista CAD' },
@@ -3016,6 +3073,8 @@ export class MeasurementTool {
         secondaryValue: isCollinear
           ? `Aristas en la misma línea | Longitudes: ${L1.toFixed(2)} mm y ${L2.toFixed(2)} mm`
           : `${bothCut ? 'Espesor / separación' : 'Distancia perpendicular'}: ${perpDist.toFixed(2)} mm | Paralelas (0.0°)`,
+        targetMeshes: [edge1.mesh, edge2.mesh].filter(Boolean),
+        targetPoints: [edge1.midpoint, edge2.midpoint].filter(Boolean),
         details: [
           { label: bothCut ? 'Espesor / Distancia Perpendicular' : 'Distancia Perpendicular', value: `${perpDist.toFixed(2)} mm` },
           { label: 'Distancia Mínima entre Segmentos', value: `${segRes.dist.toFixed(2)} mm` },
@@ -3051,6 +3110,8 @@ export class MeasurementTool {
         secondaryValue: isIntersecting
           ? `Intersección directa en 3D | Longitudes: ${L1.toFixed(2)} mm y ${L2.toFixed(2)} mm`
           : `Distancia mínima entre aristas: ${segRes.dist.toFixed(2)} mm`,
+        targetMeshes: [edge1.mesh, edge2.mesh].filter(Boolean),
+        targetPoints: [edge1.midpoint, edge2.midpoint].filter(Boolean),
         details: [
           { label: 'Ángulo entre Aristas', value: `${angleDeg.toFixed(1)}°` },
           { label: 'Ángulo Suplementario', value: `${(180 - angleDeg).toFixed(1)}°` },
@@ -3099,6 +3160,8 @@ export class MeasurementTool {
         unit: 'mm',
         primaryValue: isCoplanar ? '0.00 mm (Coplanar)' : `${perpDist.toFixed(2)} mm`,
         secondaryValue: `Longitud arista: ${edgeData.length.toFixed(2)} mm | Paralela a la cara (0.0°)`,
+        targetMeshes: [edgeData.mesh, faceData.mesh].filter(Boolean),
+        targetPoints: [edgeData.midpoint, P_face].filter(Boolean),
         details: [
           { label: 'Distancia Perpendicular', value: `${perpDist.toFixed(2)} mm` },
           { label: 'Longitud de Arista', value: `${edgeData.length.toFixed(2)} mm` },
@@ -3141,6 +3204,8 @@ export class MeasurementTool {
         unit: '°',
         primaryValue: `${angleDeg.toFixed(1)}°`,
         secondaryValue: `Longitud arista: ${edgeData.length.toFixed(2)} mm`,
+        targetMeshes: [edgeData.mesh, faceData.mesh].filter(Boolean),
+        targetPoints: [edgeData.midpoint, P_face].filter(Boolean),
         details: [
           { label: 'Ángulo con la Superficie', value: `${angleDeg.toFixed(1)}°` },
           { label: 'Ángulo con la Normal', value: `${(90 - angleDeg).toFixed(1)}°` },
@@ -3177,6 +3242,7 @@ export class MeasurementTool {
     const deltaY = Math.abs(point.y - proj.y);
     const deltaZ = Math.abs(point.z - proj.z);
 
+    const ptMesh = (this.firstSelection?.mesh || this.secondSelection?.mesh);
     this.currentMeasurement = {
       type: 'line_point',
       title: 'Distancia de Punto a Arista',
@@ -3184,6 +3250,8 @@ export class MeasurementTool {
       unit: 'mm',
       primaryValue: `${dist.toFixed(2)} mm`,
       secondaryValue: `Longitud arista: ${edgeData.length.toFixed(2)} mm`,
+      targetMeshes: [edgeData.mesh, ptMesh].filter(Boolean),
+      targetPoints: [edgeData.midpoint, point].filter(Boolean),
       details: [
         { label: 'Distancia Perpendicular', value: `${dist.toFixed(2)} mm` },
         { label: 'Longitud de Arista', value: `${edgeData.length.toFixed(2)} mm` },
@@ -3237,6 +3305,8 @@ export class MeasurementTool {
       unit: 'mm',
       primaryValue: `${axisDist.toFixed(2)} mm (al eje)`,
       secondaryValue: `Distancia a la pared: ${surfDist.toFixed(2)} mm | Ø ${cylData.diameter.toFixed(2)} mm`,
+      targetMeshes: [edgeData.mesh, cylData.mesh].filter(Boolean),
+      targetPoints: [edgeData.midpoint, cylData.center || cylData.topCenter].filter(Boolean),
       details: [
         { label: 'Distancia al Eje Cilíndrico', value: `${axisDist.toFixed(2)} mm` },
         { label: 'Distancia a la Superficie / Pared', value: `${surfDist.toFixed(2)} mm` },
@@ -3286,6 +3356,7 @@ export class MeasurementTool {
     const deltaY = Math.abs(point.y - projOnPlane.y);
     const deltaZ = Math.abs(point.z - projOnPlane.z);
 
+    const ptMesh = (this.firstSelection?.mesh || this.secondSelection?.mesh);
     this.currentMeasurement = {
       type: 'point_plane',
       title: isCoplanar ? 'Punto en el Plano (Coplanar)' : 'Distancia de Punto a Plano',
@@ -3293,6 +3364,8 @@ export class MeasurementTool {
       unit: 'mm',
       primaryValue: isCoplanar ? '0.00 mm (Coplanar)' : `${perpDist.toFixed(2)} mm`,
       secondaryValue: isCoplanar ? 'El punto está sobre la cara' : `Directa a centro: ${directDist.toFixed(2)} mm`,
+      targetMeshes: [faceData.mesh, ptMesh].filter(Boolean),
+      targetPoints: [point, P_face].filter(Boolean),
       details: [
         { label: 'Distancia Perpendicular', value: `${perpDist.toFixed(2)} mm` },
         { label: 'Distancia Directa al Centro', value: `${directDist.toFixed(2)} mm` },
@@ -3355,6 +3428,7 @@ export class MeasurementTool {
     const deltaY = Math.abs(point.y - projOnAxis.y);
     const deltaZ = Math.abs(point.z - projOnAxis.z);
 
+    const ptMesh = (this.firstSelection?.mesh || this.secondSelection?.mesh);
     this.currentMeasurement = {
       type: 'point_cylinder',
       title: 'Distancia de Punto a Cilindro / Orificio',
@@ -3362,6 +3436,8 @@ export class MeasurementTool {
       unit: 'mm',
       primaryValue: `${axisDist.toFixed(2)} mm (al eje)`,
       secondaryValue: `A la pared: ${surfDist.toFixed(2)} mm (${isInside ? 'Interior' : 'Exterior'}) | Ø ${cylData.diameter.toFixed(2)} mm`,
+      targetMeshes: [cylData.mesh, ptMesh].filter(Boolean),
+      targetPoints: [point, cylData.center || cylData.topCenter].filter(Boolean),
       details: [
         { label: 'Distancia Perpendicular al Eje', value: `${axisDist.toFixed(2)} mm` },
         { label: 'Distancia a la Superficie / Pared', value: `${surfDist.toFixed(2)} mm` },
@@ -3431,6 +3507,8 @@ export class MeasurementTool {
         unit: 'mm',
         primaryValue: `${axisDist.toFixed(2)} mm (al eje)`,
         secondaryValue: `Pared a cara: ${wallDist.toFixed(2)} mm | Ø ${cylData.diameter.toFixed(2)} mm | Eje paralelo (0.0°)`,
+        targetMeshes: [faceData.mesh, cylData.mesh].filter(Boolean),
+        targetPoints: [P_face, cylData.center || cylData.topCenter].filter(Boolean),
         details: [
           { label: 'Distancia Eje a Cara', value: `${axisDist.toFixed(2)} mm` },
           { label: 'Espesor Mínimo (Pared a Cara)', value: `${wallDist.toFixed(2)} mm` },
@@ -3473,6 +3551,8 @@ export class MeasurementTool {
         unit: '°',
         primaryValue: isPerp ? '90.0° (Perpendicular)' : `${angleDeg.toFixed(1)}°`,
         secondaryValue: `Ø ${cylData.diameter.toFixed(2)} mm | Ángulo con la normal: ${(90 - angleDeg).toFixed(1)}°`,
+        targetMeshes: [faceData.mesh, cylData.mesh].filter(Boolean),
+        targetPoints: [P_face, cylData.center || cylData.topCenter].filter(Boolean),
         details: [
           { label: 'Ángulo con la Superficie', value: `${angleDeg.toFixed(1)}°` },
           { label: 'Ángulo con la Normal', value: `${(90 - angleDeg).toFixed(1)}°` },
@@ -3599,6 +3679,12 @@ export class MeasurementTool {
     const deltaY = Math.abs(P2.y - P1.y);
     const deltaZ = Math.abs(P2.z - P1.z);
 
+    const targetMeshes = [
+      sel1.mesh || (sel1.rawHit && sel1.rawHit.object),
+      sel2.mesh || (sel2.rawHit && sel2.rawHit.object)
+    ].filter(Boolean);
+    const targetPoints = [P1, P2].filter(Boolean);
+
     const measurement = {
       type: 'distance',
       title: 'Distancia 3D (Punto a Punto)',
@@ -3607,6 +3693,8 @@ export class MeasurementTool {
       unit: 'mm',
       primaryValue: `${directDistance.toFixed(2)} mm`,
       secondaryValue: `ΔX: ${deltaX.toFixed(1)} | ΔY: ${deltaY.toFixed(1)} | ΔZ: ${deltaZ.toFixed(1)} mm`,
+      targetMeshes,
+      targetPoints,
       details: [
         { label: 'Distancia Total 3D', value: `${directDistance.toFixed(2)} mm` },
         { label: 'Componente ΔX (Ancho)', value: `${deltaX.toFixed(2)} mm` },
@@ -3861,13 +3949,13 @@ export class MeasurementTool {
       const cylMat = new THREE.MeshBasicMaterial({
         color: colorHex,
         transparent: true,
-        opacity: isHover ? 0.08 : 0.16,
+        opacity: isHover ? 0.25 : 0.40,
         side: THREE.DoubleSide,
         depthTest: !this.xray,
         depthWrite: false,
         polygonOffset: true,
-        polygonOffsetFactor: isHover ? -1 : -2,
-        polygonOffsetUnits: isHover ? -1 : -2
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4
       });
       const cylMesh = new THREE.Mesh(cylData.cylinderGeometry, cylMat);
       cylMesh.renderOrder = isHover ? 3008 : 3010;
@@ -3897,18 +3985,25 @@ export class MeasurementTool {
     // 3. Central click pin, crosshairs, and axis line (only for locked selections, not hover)
     if (!isHover) {
       const center = topCenter;
-      const pinR = Math.max(0.12, Math.min(0.6, cylData.radius * 0.02));
+      const pinR = Math.max(0.6, Math.min(1.2, cylData.radius * 0.04));
 
       // Center marker
       const pinGeom = new THREE.SphereGeometry(pinR, 16, 16);
-      const pinMat = new THREE.MeshBasicMaterial({ color: colorHex, depthTest: !this.xray });
+      const pinMat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        depthTest: !this.xray,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4
+      });
       const pin = new THREE.Mesh(pinGeom, pinMat);
       pin.position.copy(center);
       pin.renderOrder = 3020;
       group.add(pin);
 
       // Center crosshairs along U and V (subtle visible rods scaled with radius)
-      const chRodR = Math.max(0.03, Math.min(0.25, cylData.radius * 0.01));
+      const chRodR = Math.max(0.3, Math.min(0.6, cylData.radius * 0.02));
       const chLen = cylData.radius * 0.85;
       const u1 = center.clone().addScaledVector(cylData.U, -chLen);
       const u2 = center.clone().addScaledVector(cylData.U, chLen);
@@ -3922,17 +4017,9 @@ export class MeasurementTool {
         const ext = Math.max(cylData.radius * 0.15, 1.0);
         const axisP1 = cylData.bottomCenter.clone().addScaledVector(cylData.axis, -ext);
         const axisP2 = cylData.topCenter.clone().addScaledVector(cylData.axis, ext);
-        const axisGeom = new THREE.BufferGeometry().setFromPoints([axisP1, axisP2]);
-        const axisMat = new THREE.LineDashedMaterial({
-          color: COLOR_ACCENT, // warm gold dashed line
-          dashSize: Math.max(1.0, Math.min(4.0, cylData.radius * 0.04)),
-          gapSize: Math.max(0.8, Math.min(2.5, cylData.radius * 0.025)),
-          depthTest: !this.xray
-        });
-        const axisLine = new THREE.Line(axisGeom, axisMat);
-        axisLine.computeLineDistances();
-        axisLine.renderOrder = 3019;
-        group.add(axisLine);
+        const axisRod = createThickLineMesh(axisP1, axisP2, Math.max(0.35, chRodR * 0.8), COLOR_ACCENT, !this.xray, true);
+        axisRod.renderOrder = 3019;
+        group.add(axisRod);
       }
     }
 
@@ -3954,14 +4041,21 @@ export class MeasurementTool {
     const minR = Math.min(cyl1.radius, cyl2.radius);
 
     // 1. Solid dimension rod connecting centers (proportional to cylinder size)
-    const rodR = Math.max(0.06, Math.min(0.4, minR * 0.02));
+    const rodR = Math.max(0.55, Math.min(0.95, minR * 0.035));
     const dimLine = createThickLineMesh(C1, C2, rodR, this.getDimensionColor(), !this.xray, true);
     group.add(dimLine);
 
     // 2. End markers (crisp small CAD terminal dots, proportional to cylinder size)
-    const markerR = Math.max(0.12, Math.min(0.6, minR * 0.025));
+    const markerR = Math.max(0.75, Math.min(1.4, minR * 0.045));
     const markerGeom = new THREE.SphereGeometry(markerR, 16, 16);
-    const markerMat = new THREE.MeshBasicMaterial({ color: this.getDimensionColor(), depthTest: !this.xray });
+    const markerMat = new THREE.MeshBasicMaterial({
+      color: this.getDimensionColor(),
+      depthTest: !this.xray,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -5,
+      polygonOffsetUnits: -5
+    });
 
     const m1 = new THREE.Mesh(markerGeom, markerMat);
     m1.position.copy(C1);
@@ -3999,9 +4093,16 @@ export class MeasurementTool {
     const group = new THREE.Group();
 
     // 1. Point markers at A, B, C (crisp CAD markers, proportional)
-    const markerR = Math.max(0.12, Math.min(0.6, circleData.radius * 0.025));
+    const markerR = Math.max(0.7, Math.min(1.3, circleData.radius * 0.045));
     const markerGeom = new THREE.SphereGeometry(markerR, 16, 16);
-    const markerMat = new THREE.MeshBasicMaterial({ color: COLOR_ITEM1, depthTest: !this.xray });
+    const markerMat = new THREE.MeshBasicMaterial({
+      color: COLOR_ITEM1,
+      depthTest: !this.xray,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -5,
+      polygonOffsetUnits: -5
+    });
 
     [A, B, C].forEach((pt) => {
       const m = new THREE.Mesh(markerGeom, markerMat);
@@ -4053,13 +4154,13 @@ export class MeasurementTool {
       const faceMat = new THREE.MeshBasicMaterial({
         color: colorHex,
         transparent: true,
-        opacity: isHover ? 0.08 : 0.16,
+        opacity: isHover ? 0.25 : 0.42,
         side: THREE.DoubleSide,
         depthTest: !this.xray,
         depthWrite: false,
         polygonOffset: true,
-        polygonOffsetFactor: isHover ? -1 : -2,
-        polygonOffsetUnits: isHover ? -1 : -2
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4
       });
 
       const faceMesh = new THREE.Mesh(faceData.faceGeometry, faceMat);
@@ -4070,21 +4171,21 @@ export class MeasurementTool {
     // 2. Boundary contour lines (outer perimeter and inner holes)
     if (faceData.boundarySegments && faceData.boundarySegments.length > 0 && faceData.boundarySegments.length <= 600) {
       const borderGroup = new THREE.Group();
-      const r = isHover ? 0.35 : 0.5;
+      const r = isHover ? 0.55 : 0.85;
       for (let i = 0; i < faceData.boundarySegments.length; i += 2) {
         const p1 = faceData.boundarySegments[i];
         const p2 = faceData.boundarySegments[i + 1];
-        borderGroup.add(createThickLineMesh(p1, p2, r, colorHex, !this.xray));
+        borderGroup.add(createThickLineMesh(p1, p2, r, colorHex, !this.xray, true));
       }
       group.add(borderGroup);
     } else if (faceData.boundaryGeometry) {
       const borderMat = new THREE.LineBasicMaterial({
         color: colorHex,
-        linewidth: isHover ? 1.0 : 1.5,
+        linewidth: 2.0,
         depthTest: !this.xray,
         polygonOffset: true,
-        polygonOffsetFactor: -3,
-        polygonOffsetUnits: -3
+        polygonOffsetFactor: -4,
+        polygonOffsetUnits: -4
       });
       const borderLine = new THREE.LineSegments(faceData.boundaryGeometry, borderMat);
       borderLine.renderOrder = isHover ? 3009 : 3012;
@@ -4096,9 +4197,16 @@ export class MeasurementTool {
       const point = faceData.hitPoint;
       const normal = faceData.normal;
 
-      const pinR = 0.8;
+      const pinR = 1.0;
       const pinGeom = new THREE.SphereGeometry(pinR, 16, 16);
-      const pinMat = new THREE.MeshBasicMaterial({ color: colorHex, depthTest: !this.xray });
+      const pinMat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        depthTest: !this.xray,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -5,
+        polygonOffsetUnits: -5
+      });
       const pin = new THREE.Mesh(pinGeom, pinMat);
       pin.position.copy(point);
       pin.renderOrder = 3015;
@@ -4107,10 +4215,17 @@ export class MeasurementTool {
       // Normal vector arrow
       const arrowLen = 8.0;
       const arrowTip = point.clone().addScaledVector(normal, arrowLen);
-      group.add(createThickLineMesh(point, arrowTip, 0.4, colorHex, !this.xray));
+      group.add(createThickLineMesh(point, arrowTip, 0.55, colorHex, !this.xray, true));
 
-      const coneGeom = new THREE.ConeGeometry(1.0, 3.0, 16);
-      const coneMat = new THREE.MeshBasicMaterial({ color: colorHex, depthTest: !this.xray });
+      const coneGeom = new THREE.ConeGeometry(1.2, 3.2, 16);
+      const coneMat = new THREE.MeshBasicMaterial({
+        color: colorHex,
+        depthTest: !this.xray,
+        depthWrite: false,
+        polygonOffset: true,
+        polygonOffsetFactor: -5,
+        polygonOffsetUnits: -5
+      });
       const cone = new THREE.Mesh(coneGeom, coneMat);
       cone.position.copy(arrowTip);
       const coneQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
@@ -4130,17 +4245,24 @@ export class MeasurementTool {
     const group = new THREE.Group();
     group.name = isHover ? 'hoverEdgeHighlight' : `edgeHighlight_${stepNumber}`;
 
-    const rodR = isHover ? 0.45 : 0.7;
-    const endSphereR = isHover ? 0.75 : 1.1;
+    const rodR = isHover ? 0.75 : 1.1;
+    const endSphereR = isHover ? 1.2 : 1.6;
 
     // 1. Solid cylindrical rod along the straight CAD edge
-    const rod = createThickLineMesh(edgeData.p1, edgeData.p2, rodR, colorHex, !this.xray);
+    const rod = createThickLineMesh(edgeData.p1, edgeData.p2, rodR, colorHex, !this.xray, true);
     rod.renderOrder = isHover ? 3010 : 3014;
     group.add(rod);
 
     // 2. Spherical end markers
     const sphereGeom = new THREE.SphereGeometry(endSphereR, 16, 16);
-    const sphereMat = new THREE.MeshBasicMaterial({ color: colorHex, depthTest: !this.xray });
+    const sphereMat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      depthTest: !this.xray,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -5,
+      polygonOffsetUnits: -5
+    });
 
     const m1 = new THREE.Mesh(sphereGeom, sphereMat);
     m1.position.copy(edgeData.p1);
@@ -4154,7 +4276,7 @@ export class MeasurementTool {
 
     // 3. Central selection pin with step badge (if locked selection)
     if (!isHover && edgeData.midpoint) {
-      const pinGeom = new THREE.SphereGeometry(0.85, 16, 16);
+      const pinGeom = new THREE.SphereGeometry(1.2, 16, 16);
       const pin = new THREE.Mesh(pinGeom, sphereMat);
       pin.position.copy(edgeData.midpoint);
       pin.renderOrder = 3016;
@@ -4182,9 +4304,13 @@ export class MeasurementTool {
     const quadMat = new THREE.MeshBasicMaterial({
       color: colorHex,
       transparent: true,
-      opacity: 0.16,
+      opacity: 0.38,
       side: THREE.DoubleSide,
-      depthTest: !this.xray
+      depthTest: !this.xray,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -4,
+      polygonOffsetUnits: -4
     });
     const quadMesh = new THREE.Mesh(quadGeom, quadMat);
 
@@ -4203,17 +4329,27 @@ export class MeasurementTool {
     const edgesGeom = new THREE.EdgesGeometry(quadGeom);
     const edgesMat = new THREE.LineBasicMaterial({
       color: colorHex,
-      linewidth: 1.5,
-      depthTest: !this.xray
+      linewidth: 2.0,
+      depthTest: !this.xray,
+      polygonOffset: true,
+      polygonOffsetFactor: -5,
+      polygonOffsetUnits: -5
     });
     const edgesLine = new THREE.LineSegments(edgesGeom, edgesMat);
     edgesLine.renderOrder = 3011;
     quadMesh.add(edgesLine);
 
     // 3. Central click pin
-    const pinR = 0.8;
+    const pinR = 1.0;
     const pinGeom = new THREE.SphereGeometry(pinR, 16, 16);
-    const pinMat = new THREE.MeshBasicMaterial({ color: colorHex, depthTest: !this.xray });
+    const pinMat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      depthTest: !this.xray,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -5,
+      polygonOffsetUnits: -5
+    });
     const pin = new THREE.Mesh(pinGeom, pinMat);
     pin.position.copy(point);
     pin.renderOrder = 3012;
@@ -4222,10 +4358,17 @@ export class MeasurementTool {
     // 4. Normal vector arrow indicating plane orientation
     const arrowLen = 8.0;
     const arrowTip = point.clone().addScaledVector(normal, arrowLen);
-    group.add(createThickLineMesh(point, arrowTip, 0.4, colorHex, !this.xray));
+    group.add(createThickLineMesh(point, arrowTip, 0.55, colorHex, !this.xray, true));
 
-    const coneGeom = new THREE.ConeGeometry(1.0, 3.0, 16);
-    const coneMat = new THREE.MeshBasicMaterial({ color: colorHex, depthTest: !this.xray });
+    const coneGeom = new THREE.ConeGeometry(1.2, 3.2, 16);
+    const coneMat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      depthTest: !this.xray,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -5,
+      polygonOffsetUnits: -5
+    });
     const cone = new THREE.Mesh(coneGeom, coneMat);
     cone.position.copy(arrowTip);
     const coneQuat = new THREE.Quaternion().setFromUnitVectors(new THREE.Vector3(0, 1, 0), normal);
@@ -4253,13 +4396,20 @@ export class MeasurementTool {
 
       if (perpDist >= 0.05) {
         // 1. Solid perpendicular dimension rod
-        const perpLine = createThickLineMesh(P2, projP1, 0.5, this.getDimensionColor(), !this.xray, true);
+        const perpLine = createThickLineMesh(P2, projP1, 0.85, this.getDimensionColor(), !this.xray, true);
         group.add(perpLine);
 
         // 2. Dimension end markers at P2 and projP1
-        const markerR = 0.8;
+        const markerR = 1.25;
         const markerGeom = new THREE.SphereGeometry(markerR, 16, 16);
-        const markerMat = new THREE.MeshBasicMaterial({ color: this.getDimensionColor(), depthTest: !this.xray });
+        const markerMat = new THREE.MeshBasicMaterial({
+          color: this.getDimensionColor(),
+          depthTest: !this.xray,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -5,
+          polygonOffsetUnits: -5
+        });
 
         const mP2 = new THREE.Mesh(markerGeom, markerMat);
         mP2.position.copy(P2);
@@ -4276,15 +4426,7 @@ export class MeasurementTool {
         // 3. Extension projection reference line on Plane 1 (connecting P1 to projP1)
         const extDist = P1.distanceTo(projP1);
         if (extDist > 0.5) {
-          const extGeom = new THREE.BufferGeometry().setFromPoints([P1, projP1]);
-          const extMat = new THREE.LineDashedMaterial({
-            color: COLOR_ACCENT, // warm gold dashed line
-            dashSize: 3.0,
-            gapSize: 1.5,
-            depthTest: !this.xray
-          });
-          const extLine = new THREE.Line(extGeom, extMat);
-          extLine.computeLineDistances();
+          const extLine = createThickLineMesh(P1, projP1, 0.55, COLOR_ACCENT, !this.xray, true);
           extLine.renderOrder = 3019;
           group.add(extLine);
         }
@@ -4301,7 +4443,7 @@ export class MeasurementTool {
         }];
       } else {
         // Coplanar faces: connecting rod between P1 and P2
-        const coplanarLine = createThickLineMesh(P1, P2, 0.5, this.getDimensionColor(), !this.xray, true);
+        const coplanarLine = createThickLineMesh(P1, P2, 0.85, this.getDimensionColor(), !this.xray, true);
         group.add(coplanarLine);
 
         const mid = new THREE.Vector3().addVectors(P1, P2).multiplyScalar(0.5);
@@ -4316,7 +4458,7 @@ export class MeasurementTool {
       }
     } else {
       // Angled faces: connecting rod between P1 and P2
-      const line = createThickLineMesh(P1, P2, 0.5, this.getDimensionColor(), !this.xray, true);
+      const line = createThickLineMesh(P1, P2, 0.85, this.getDimensionColor(), !this.xray, true);
       group.add(line);
 
       const mid = new THREE.Vector3().addVectors(P1, P2).multiplyScalar(0.5);
@@ -4338,9 +4480,16 @@ export class MeasurementTool {
    */
   renderPointMarker(point, colorHex, labelNumber) {
     const scale = Math.max(0.6, this.getSnapThreshold(point) * 0.18);
-    const r = 0.8;
+    const r = 1.0;
     const geom = new THREE.SphereGeometry(r, 16, 16);
-    const mat = new THREE.MeshBasicMaterial({ color: colorHex, depthTest: !this.xray });
+    const mat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      depthTest: !this.xray,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -5,
+      polygonOffsetUnits: -5
+    });
     const sphere = new THREE.Mesh(geom, mat);
     sphere.position.copy(point);
     sphere.scale.set(scale, scale, scale);
@@ -4349,7 +4498,17 @@ export class MeasurementTool {
 
     // Subtle billboarded outer ring
     const ringGeom = new THREE.RingGeometry(r * 1.3, r * 1.8, 32);
-    const ringMat = new THREE.MeshBasicMaterial({ color: colorHex, side: THREE.DoubleSide, depthTest: !this.xray, transparent: true, opacity: 0.8 });
+    const ringMat = new THREE.MeshBasicMaterial({
+      color: colorHex,
+      side: THREE.DoubleSide,
+      depthTest: !this.xray,
+      depthWrite: false,
+      transparent: true,
+      opacity: 0.85,
+      polygonOffset: true,
+      polygonOffsetFactor: -5,
+      polygonOffsetUnits: -5
+    });
     const ring = new THREE.Mesh(ringGeom, ringMat);
     if (this.camera) {
       ring.quaternion.copy(this.camera.quaternion);
@@ -4366,24 +4525,31 @@ export class MeasurementTool {
     const group = new THREE.Group();
 
     // 1. Solid dimension rod
-    const line = createThickLineMesh(p1, p2, 0.5, this.getDimensionColor(), !this.xray, true);
+    const line = createThickLineMesh(p1, p2, 0.85, this.getDimensionColor(), !this.xray, true);
     group.add(line);
 
-    // 2. End markers (crisp small CAD terminal dots)
-    const markerR = 0.8;
+    // 2. End markers (crisp CAD terminal dots)
+    const markerR = 1.25;
     const markerGeom = new THREE.SphereGeometry(markerR, 16, 16);
-    const markerMat = new THREE.MeshBasicMaterial({ color: this.getDimensionColor(), depthTest: !this.xray });
+    const markerMat = new THREE.MeshBasicMaterial({
+      color: this.getDimensionColor(),
+      depthTest: !this.xray,
+      depthWrite: false,
+      polygonOffset: true,
+      polygonOffsetFactor: -5,
+      polygonOffsetUnits: -5
+    });
 
     const m1 = new THREE.Mesh(markerGeom, markerMat);
     m1.position.copy(p1);
     m1.userData.isDimensionLine = true;
-    m1.renderOrder = 3021;
+    m1.renderOrder = 3026;
     group.add(m1);
 
     const m2 = new THREE.Mesh(markerGeom, markerMat);
     m2.position.copy(p2);
     m2.userData.isDimensionLine = true;
-    m2.renderOrder = 3021;
+    m2.renderOrder = 3026;
     group.add(m2);
 
     this.visualsGroup.add(group);
@@ -4401,10 +4567,95 @@ export class MeasurementTool {
   }
 
   /**
+   * Evaluates whether a measurement should be visible on screen based on:
+   * 1. Visibility of measured objects in the scene/tree (if a part is hidden or isolated-out, hide the cota)
+   * 2. Section cut clipping plane (if points are in the cut-away/removed part, hide the cota)
+   */
+  isMeasurementVisible(entry) {
+    if (!entry) return true;
+
+    // 1. Check if any associated mesh is hidden / invisible / isolated-out
+    const meshes = entry.targetMeshes;
+    if (meshes && meshes.length > 0 && this.viewer && typeof this.viewer.isMeshVisibleInView === 'function') {
+      for (let i = 0; i < meshes.length; i++) {
+        const m = meshes[i];
+        if (!this.viewer.isMeshVisibleInView(m)) {
+          return false; // If one of the objects is hidden, the measurement between them must not show!
+        }
+      }
+    }
+
+    // 2. Check if the measurement is on a cut-away / removed section
+    if (this.viewer && this.viewer.sectionActive && this.viewer.sectionPlane) {
+      const plane = this.viewer.sectionPlane;
+      const points = entry.targetPoints;
+      if (points && points.length > 0) {
+        for (let i = 0; i < points.length; i++) {
+          const pt = points[i];
+          if (pt && plane.distanceToPoint(pt) < -0.005) {
+            return false; // Point is in the removed half-space!
+          }
+        }
+      }
+      if (entry.worldPos && plane.distanceToPoint(entry.worldPos) < -0.005) {
+        return false;
+      }
+    }
+
+    return true;
+  }
+
+  /**
    * Update 2D screen projections of floating 3D dimension badges
    * Called every frame from requestAnimationFrame in viewer.js
    */
   update() {
+    // 1. Synchronize visibility of saved measurements and their 3D groups
+    if (this.savedMeasurements && this.savedMeasurements.length > 0) {
+      for (let i = 0; i < this.savedMeasurements.length; i++) {
+        const sm = this.savedMeasurements[i];
+        const isVisible = this.isMeasurementVisible(sm);
+        if (sm.group) {
+          sm.group.visible = isVisible;
+        }
+        if (sm.badges) {
+          for (let j = 0; j < sm.badges.length; j++) {
+            sm.badges[j].measureVisible = isVisible;
+          }
+        }
+      }
+    }
+
+    // 2. Synchronize active draft measurement and visuals visibility
+    if (this.currentMeasurement) {
+      const activeVisible = this.isMeasurementVisible(this.currentMeasurement);
+      if (this.visualsGroup) this.visualsGroup.visible = activeVisible;
+      if (this.selectionGroup) this.selectionGroup.visible = activeVisible;
+      if (this.badges) {
+        for (let k = 0; k < this.badges.length; k++) {
+          this.badges[k].measureVisible = activeVisible;
+        }
+      }
+    } else if (this.firstSelection) {
+      const firstMesh = this.firstSelection.mesh || this.firstSelection.rawHit?.object;
+      const firstPt = this.firstSelection.point;
+      let firstVisible = true;
+      if (firstMesh && this.viewer && typeof this.viewer.isMeshVisibleInView === 'function' && !this.viewer.isMeshVisibleInView(firstMesh)) {
+        firstVisible = false;
+      }
+      if (firstPt && this.viewer && this.viewer.sectionActive && this.viewer.sectionPlane) {
+        if (this.viewer.sectionPlane.distanceToPoint(firstPt) < -0.005) {
+          firstVisible = false;
+        }
+      }
+      if (this.selectionGroup) this.selectionGroup.visible = firstVisible;
+      if (this.badges) {
+        for (let k = 0; k < this.badges.length; k++) {
+          this.badges[k].measureVisible = firstVisible;
+        }
+      }
+    }
+
     const allBadges = this.getAllBadges();
     if (allBadges.length === 0 || !this.camera || !this.renderer) return;
 
@@ -4421,6 +4672,15 @@ export class MeasurementTool {
       const badge = allBadges[i];
       if (!badge.worldPos) continue;
 
+      let canShow = badge.measureVisible !== false;
+
+      // Check if badge anchor itself is clipped away by cutting plane
+      if (canShow && this.viewer && this.viewer.sectionActive && this.viewer.sectionPlane) {
+        if (this.viewer.sectionPlane.distanceToPoint(badge.worldPos) < -0.005) {
+          canShow = false;
+        }
+      }
+
       toPt.subVectors(badge.worldPos, this.camera.position);
       const isInFront = camDir.dot(toPt) > 0;
 
@@ -4428,7 +4688,7 @@ export class MeasurementTool {
       tempV.project(this.camera);
 
       // In front of camera check (z in [-1, 1] and positive dot along camera forward)
-      if (isInFront && tempV.z >= -1.0 && tempV.z <= 1.0) {
+      if (canShow && isInFront && tempV.z >= -1.0 && tempV.z <= 1.0) {
         badge.screenX = (tempV.x * 0.5 + 0.5) * rect.width;
         badge.screenY = (-(tempV.y * 0.5) + 0.5) * rect.height;
         badge.visible = true;
