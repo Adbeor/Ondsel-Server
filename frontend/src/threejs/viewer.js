@@ -146,6 +146,9 @@ export class Viewer {
     this.height = height;
     this.viewport = viewport;
     this.window = window;
+    if (typeof window !== 'undefined') {
+      window.__ondsel_viewer = this;
+    }
     this.obj = null;
     this.lineSegments = null;
     this.axisHelper = null
@@ -1757,6 +1760,7 @@ export class Viewer {
     const keyOf = (p) => `${Math.round(p.x * factor)}_${Math.round(p.y * factor)}_${Math.round(p.z * factor)}`;
 
     const allCutEdges = [];
+    const allCutCircles = [];
 
     for (let m = 0; m < visibleMeshes.length; m++) {
       const mesh = visibleMeshes[m];

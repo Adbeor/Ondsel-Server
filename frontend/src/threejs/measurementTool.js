@@ -1482,115 +1482,12 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
     }
   }
 
-  // 1.5 CHECK: Planar circular face / end cap (e.g. flat circular cap or base of cylinder)
-  const planarFace = extractCADPlanarFace(mesh, seedTriangleIndex, hitPoint, cameraRayDirection);
-  if (planarFace && planarFace.boundaryGeometry) {
-    const bPos = planarFace.boundaryGeometry.attributes.position;
-    if (bPos && bPos.count >= 16) {
-      const factor = 1000;
-      const keyOf = (p) => `${Math.round(p.x * factor)}_${Math.round(p.y * factor)}_${Math.round(p.z * factor)}`;
-      const nodeMap = new Map();
-      const nodes = [];
-      const getOrCreateNode = (p) => {
-        const k = keyOf(p);
-        if (nodeMap.has(k)) return nodeMap.get(k);
-        const id = nodes.length;
-        nodes.push(p);
-        nodeMap.set(k, id);
-        return id;
-      };
-
-      const adj = new Map();
-      const pA = new THREE.Vector3();
-      const pB = new THREE.Vector3();
-      for (let i = 0; i < bPos.count; i += 2) {
-        pA.fromBufferAttribute(bPos, i);
-        pB.fromBufferAttribute(bPos, i + 1);
-        const id1 = getOrCreateNode(pA.clone());
-        const id2 = getOrCreateNode(pB.clone());
-        if (id1 === id2) continue;
-        if (!adj.has(id1)) adj.set(id1, new Set());
-        if (!adj.has(id2)) adj.set(id2, new Set());
-        adj.get(id1).add(id2);
-        adj.get(id2).add(id1);
-      }
-
-      const visitedEdges = new Set();
-      const edgeKey = (a, b) => (a < b ? `${a}_${b}` : `${b}_${a}`);
-
-      for (const [node, neighbors] of adj.entries()) {
-        for (const n of neighbors) {
-          if (visitedEdges.has(edgeKey(node, n))) continue;
-          const loop = [node, n];
-          visitedEdges.add(edgeKey(node, n));
-          let prev = node;
-          let curr = n;
-          let isClosed = false;
-          while (true) {
-            const nextNbrs = Array.from(adj.get(curr) || []).filter(nb => nb !== prev && !visitedEdges.has(edgeKey(curr, nb)));
-            if (nextNbrs.length === 1) {
-              const next = nextNbrs[0];
-              visitedEdges.add(edgeKey(curr, next));
-              loop.push(next);
-              prev = curr;
-              curr = next;
-              if (curr === node) {
-                isClosed = true;
-                break;
-              }
-            } else {
-              break;
-            }
-          }
-
-          if (isClosed && loop.length >= 8) {
-            const loopPts = loop.map(id => nodes[id]);
-            const norm = planarFace.normal.clone();
-            const { U, V } = getOrthonormalBasis(norm);
-            const pts2D = loopPts.map(p => ({ u: p.dot(U), v: p.dot(V) }));
-            const fit = fitCircle2D(pts2D);
-            if (fit && fit.r >= 0.1 && fit.relError <= 0.035) {
-              const planeConstant = -norm.dot(loopPts[0]);
-              const centerWorld = new THREE.Vector3()
-                .addScaledVector(U, fit.uc)
-                .addScaledVector(V, fit.vc)
-                .addScaledVector(norm, -planeConstant);
-
-              return {
-                type: 'circle',
-                isHole: false,
-                label: 'Cara Circular (Base / Tapa)',
-                mesh,
-                radius: fit.r,
-                diameter: fit.r * 2,
-                depth: 0,
-                center: centerWorld,
-                rimCenter: centerWorld,
-                otherRimCenter: null,
-                topCenter: centerWorld,
-                bottomCenter: centerWorld,
-                axis: norm,
-                U,
-                V,
-                cylinderGeometry: null,
-                boundaryGeometry: planarFace.boundaryGeometry,
-                triangleIndicesSet: planarFace.triangleIndicesSet,
-                trianglesCount: planarFace.trianglesCount,
-                hitPoint: hitPoint.clone()
-              };
-            }
-          }
-        }
-      }
-    }
-  }
-
   // 2. SECONDARY: Cylinder Wall Detection (when user clicks on a cylindrical wall)
   // On a cylindrical surface, neighboring facets curve continuously.
   let candidateAxis = null;
   const bfsQueue = [seedTriangleIndex];
   const bfsVisited = new Set([seedTriangleIndex]);
-  const maxBfsSearch = 256;
+  const maxBfsSearch = 64;
 
   while (bfsQueue.length > 0 && bfsVisited.size < maxBfsSearch && !candidateAxis) {
     const curIdx = bfsQueue.shift();
@@ -1603,8 +1500,8 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
         bfsVisited.add(ni);
         const nbr = triangles[ni];
         const dot = seedTri.normal.dot(nbr.normal);
-        // Adjacent facets on a cylinder have dot between 0.70 (coarse 8-gon) and 0.999995
-        if (dot > 0.70 && dot < 0.999995) {
+        // Adjacent facets on a cylinder have dot between 0.70 (coarse 8-gon) and 0.9995
+        if (dot > 0.70 && dot < 0.9995) {
           const cross = new THREE.Vector3().crossVectors(seedTri.normal, nbr.normal);
           if (cross.lengthSq() > 1e-6) {
             candidateAxis = cross.normalize();
@@ -1708,7 +1605,7 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
               if (g > maxArcInnerGap) maxArcInnerGap = g;
             }
             const totalSpanDeg = (polarAngles[polarAngles.length - 1] - polarAngles[0]) * (180 / Math.PI);
-            if (maxArcInnerGap * (180 / Math.PI) > 55.0 || totalSpanDeg < 45.0 || uniqueCrossPts.length < 6) {
+            if (maxArcInnerGap * (180 / Math.PI) > 35.0 || totalSpanDeg < 45.0 || uniqueCrossPts.length < 6) {
               return null;
             }
           }
@@ -1762,7 +1659,7 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
             const nV = triNormWorld.dot(V);
             normBins.add(Math.round(Math.atan2(nV, nU) / (Math.PI / 12)));
           }
-          if (badNormals > cylTriangles.length * 0.15 || normBins.size < 4) {
+          if (badNormals > cylTriangles.length * 0.15 || normBins.size < 6) {
             return null;
           }
 
