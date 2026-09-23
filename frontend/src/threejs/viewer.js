@@ -652,6 +652,11 @@ export class Viewer {
     if (event.button === 2) {
       this.rightPointerDownPos = { x: event.clientX, y: event.clientY };
       this.rightPointerDownTime = performance.now();
+      if (this.camera) {
+        this.cameraPosAtRightDown = this.camera.position.clone();
+        this.cameraQuatAtRightDown = this.camera.quaternion.clone();
+      }
+      this.rightPointerMoved = false;
     }
   }
 
@@ -671,6 +676,13 @@ export class Viewer {
       const dist = Math.hypot(curX - this.pointerDownPos.x, curY - this.pointerDownPos.y);
       if (dist > 5) {
         this.pointerMoved = true;
+      }
+    }
+
+    if (this.rightPointerDownPos) {
+      const rightDist = Math.hypot(curX - this.rightPointerDownPos.x, curY - this.rightPointerDownPos.y);
+      if (rightDist > 6) {
+        this.rightPointerMoved = true;
       }
     }
 
@@ -754,27 +766,34 @@ export class Viewer {
     if (this._isDraggingSectionPlane || (this.sectionTransformControl && (this.sectionTransformControl.dragging || this.sectionTransformControl.axis !== null))) {
       return;
     }
-    if (this.measurementTool && this.measurementTool.isActive) {
+
+    // Only allow intentional right click (button 2)
+    if (this.pointerDownButton !== undefined && this.pointerDownButton !== 2 && event.button !== 2) {
       return;
     }
 
-    // Never trigger context menu on left button hold or drag! Only allow intentional right click (button 2).
-    if (this.pointerDownButton !== 2 && event.button !== 2) {
-      return;
-    }
-
-    // If mouse was dragged to pan/orbit camera, do not open context menu
-    if (this._isNavigating || this._hasCameraMoved || this.pointerMoved) {
-      return;
-    }
-
+    // Check pointer travel distance: if dragged > 6px, user was rotating/panning
     const pos = this.rightPointerDownPos || this.pointerDownPos;
     if (pos) {
       const dist = Math.hypot(event.clientX - pos.x, event.clientY - pos.y);
-      if (dist > 5) return;
+      if (dist > 6) return;
     }
+    if (this.rightPointerMoved) {
+      return;
+    }
+
+    // Check if camera actually moved or rotated during the right button gesture
+    if (this.camera && this.cameraPosAtRightDown && this.cameraQuatAtRightDown) {
+      const posDelta = this.camera.position.distanceTo(this.cameraPosAtRightDown);
+      const rotDelta = this.camera.quaternion.angleTo(this.cameraQuatAtRightDown);
+      if (posDelta > 0.002 || rotDelta > 0.008) {
+        return; // Camera moved, user was rotating/panning!
+      }
+    }
+
+    // Ignore long holds (> 600ms)
     const dt = performance.now() - (this.rightPointerDownTime || this.pointerDownTime || 0);
-    if (dt > 500) return; // Ignore long hold
+    if (dt > 600) return;
 
     if (!this.renderer || !this.renderer.domElement || !this.camera) return;
     const rect = this.renderer.domElement.getBoundingClientRect();

@@ -296,16 +296,40 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         class="section-analysis-card"
         elevation="8"
         rounded="lg"
-        style="position: absolute; bottom: 84px; left: 24px; width: 350px; z-index: 15; backdrop-filter: blur(12px); background-color: rgba(var(--v-theme-surface), 0.95); color: rgb(var(--v-theme-on-surface)); border: 1px solid rgba(var(--v-theme-on-surface), 0.12); box-shadow: 0 8px 32px rgba(0,0,0,0.25);"
+        :style="getSectionPanelStyle()"
+        @pointerdown="bringToFront('section')"
       >
-        <v-card-item class="pb-1 pt-3">
+        <v-card-item
+          class="pb-1 pt-2 px-3 panel-drag-header"
+          @pointerdown="startDragPanel($event, 'section')"
+          @dblclick="resetPanelPos('section')"
+        >
           <div class="d-flex justify-space-between align-center">
-            <div class="d-flex align-center">
+            <div class="d-flex align-center drag-title-area text-truncate">
+              <v-icon size="18" color="medium-emphasis" class="mr-1 drag-handle-icon">
+                mdi-drag-vertical
+                <v-tooltip activator="parent" location="top">Arrastrar para mover panel • Doble clic para restablecer</v-tooltip>
+              </v-icon>
               <v-icon color="primary" class="mr-2">mdi-vector-intersection</v-icon>
               <span class="text-subtitle-2 font-weight-bold">Análisis de Sección</span>
-              <v-chip size="x-small" color="success" class="ml-2 font-weight-medium" variant="tonal">Activo</v-chip>
+              <v-chip v-if="!sectionPanelCollapsed" size="x-small" color="success" class="ml-2 font-weight-medium" variant="tonal">Activo</v-chip>
+              <v-chip v-else size="x-small" color="primary" class="ml-2 font-weight-bold" variant="flat">
+                {{ sectionAxis.toUpperCase() }}: {{ (sectionOffset || 0).toFixed(1) }} mm
+              </v-chip>
             </div>
-            <div class="d-flex align-center">
+            <div class="d-flex align-center flex-shrink-0" @pointerdown.stop>
+              <v-btn
+                icon
+                variant="text"
+                size="x-small"
+                class="mr-1"
+                @click.stop="togglePanelCollapse('section')"
+              >
+                <v-icon size="16">{{ sectionPanelCollapsed ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
+                <v-tooltip activator="parent" location="top">
+                  {{ sectionPanelCollapsed ? 'Expandir panel de corte' : 'Minimizar panel de corte' }}
+                </v-tooltip>
+              </v-btn>
               <v-btn
                 icon="mdi-power"
                 variant="text"
@@ -314,7 +338,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 class="mr-1"
                 @click="deactivateSection"
               >
-                <v-icon>mdi-power</v-icon>
+                <v-icon size="16">mdi-power</v-icon>
                 <v-tooltip activator="parent" location="top">Desactivar y quitar corte</v-tooltip>
               </v-btn>
               <v-btn
@@ -323,15 +347,17 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 size="x-small"
                 @click="closePanel"
               >
-                <v-icon>mdi-close</v-icon>
+                <v-icon size="16">mdi-close</v-icon>
                 <v-tooltip activator="parent" location="top">Ocultar panel (el corte queda permanente)</v-tooltip>
               </v-btn>
             </div>
           </div>
         </v-card-item>
 
-        <v-card-text class="pt-2 pb-3">
-          <!-- Eje de corte -->
+        <v-expand-transition>
+          <div v-show="!sectionPanelCollapsed">
+            <v-card-text class="pt-2 pb-3">
+              <!-- Eje de corte -->
           <div class="text-caption font-weight-bold text-medium-emphasis mb-1">PLANO DE CORTE</div>
           <v-btn-toggle
             v-model="sectionAxis"
@@ -470,8 +496,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             @update:model-value="applySection"
           ></v-checkbox>
         </v-card-text>
-      </v-card>
-    </v-fade-transition>
+      </div>
+    </v-expand-transition>
+  </v-card>
+</v-fade-transition>
 
     <!-- Floating CAD Measurement Dialog/Panel -->
     <v-fade-transition>
@@ -480,16 +508,40 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         class="measurement-panel-card"
         elevation="8"
         rounded="lg"
-        style="position: absolute; bottom: 84px; left: 24px; width: 390px; max-width: calc(100vw - 48px); z-index: 15; backdrop-filter: blur(12px); background-color: rgba(var(--v-theme-surface), 0.96); color: rgb(var(--v-theme-on-surface)); border: 1px solid rgba(var(--v-theme-on-surface), 0.12); box-shadow: 0 8px 32px rgba(0,0,0,0.25);"
+        :style="getMeasurePanelStyle()"
+        @pointerdown="bringToFront('measure')"
       >
-        <v-card-item class="pb-1 pt-3">
+        <v-card-item
+          class="pb-1 pt-2 px-3 panel-drag-header"
+          @pointerdown="startDragPanel($event, 'measure')"
+          @dblclick="resetPanelPos('measure')"
+        >
           <div class="d-flex justify-space-between align-center">
-            <div class="d-flex align-center">
+            <div class="d-flex align-center drag-title-area text-truncate">
+              <v-icon size="18" color="medium-emphasis" class="mr-1 drag-handle-icon">
+                mdi-drag-vertical
+                <v-tooltip activator="parent" location="top">Arrastrar para mover panel • Doble clic para restablecer</v-tooltip>
+              </v-icon>
               <v-icon color="primary" class="mr-2">mdi-ruler-square</v-icon>
               <span class="text-subtitle-2 font-weight-bold">Medición CAD</span>
-              <v-chip size="x-small" color="primary" class="ml-2 font-weight-medium" variant="tonal">Activo</v-chip>
+              <v-chip v-if="!measurePanelCollapsed" size="x-small" color="primary" class="ml-2 font-weight-medium" variant="tonal">Activo</v-chip>
+              <v-chip v-else-if="currentMeasurement" size="x-small" color="primary" class="ml-2 font-weight-bold" variant="flat">
+                {{ currentMeasurement.primaryValue }}
+              </v-chip>
             </div>
-            <div class="d-flex align-center">
+            <div class="d-flex align-center flex-shrink-0" @pointerdown.stop>
+              <v-btn
+                icon
+                variant="text"
+                size="x-small"
+                class="mr-1"
+                @click.stop="togglePanelCollapse('measure')"
+              >
+                <v-icon size="16">{{ measurePanelCollapsed ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
+                <v-tooltip activator="parent" location="top">
+                  {{ measurePanelCollapsed ? 'Expandir panel de medición' : 'Minimizar panel de medición' }}
+                </v-tooltip>
+              </v-btn>
               <v-btn
                 icon
                 variant="text"
@@ -541,8 +593,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           </div>
         </v-card-item>
 
-        <v-card-text class="pt-2 pb-3">
-          <!-- Modo de medición -->
+        <v-expand-transition>
+          <div v-show="!measurePanelCollapsed">
+            <v-card-text class="pt-2 pb-3">
+              <!-- Modo de medición -->
           <div class="text-caption font-weight-bold text-medium-emphasis mb-1">TIPO DE MEDICIÓN</div>
           <v-btn-toggle
             v-model="measureMode"
@@ -758,8 +812,10 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             </v-list>
           </div>
         </v-card-text>
-      </v-card>
-    </v-fade-transition>
+      </div>
+    </v-expand-transition>
+  </v-card>
+</v-fade-transition>
 
     <!-- CAD Context Menu (Right Click Fusion 360 Style) -->
     <v-menu
@@ -1128,6 +1184,13 @@ export default {
     selectedPartProps: null,
     navigationStyle: (typeof localStorage !== 'undefined' && localStorage.getItem('ondsel_nav_style')) || 'touchpad',
     navMenuOpen: false,
+    measurePanelPos: { x: null, y: null },
+    sectionPanelPos: { x: null, y: null },
+    measurePanelCollapsed: false,
+    sectionPanelCollapsed: false,
+    isDraggingPanel: null,
+    panelZIndices: { measure: 15, section: 15 },
+    highestPanelZIndex: 15,
   }),
   computed: {
     viewport3d: vm => vm.$refs.modelViewer,
@@ -1161,9 +1224,12 @@ export default {
   },
   mounted() {
     window.addEventListener('keydown', this.handleKeyDown);
+    this.loadSavedPanelPositions();
+    window.addEventListener('resize', this.clampPanelPositions);
   },
   beforeUnmount() {
     window.removeEventListener('keydown', this.handleKeyDown);
+    window.removeEventListener('resize', this.clampPanelPositions);
     if (this.viewer && typeof this.viewer.destroy === 'function') {
       this.viewer.destroy();
     }
@@ -1266,11 +1332,15 @@ export default {
       if (!this.sectionActive) {
         this.sectionActive = true;
         this.sectionPanelOpen = true;
+        this.bringToFront('section');
         this.$emit('section:changed', true);
         this.updateBounds();
         this.applySection();
       } else {
         this.sectionPanelOpen = !this.sectionPanelOpen;
+        if (this.sectionPanelOpen) {
+          this.bringToFront('section');
+        }
         this.applySection();
       }
     },
@@ -1360,6 +1430,7 @@ export default {
       if (!this.measureActive) {
         this.measureActive = true;
         this.measurePanelOpen = true;
+        this.bringToFront('measure');
         this.sectionPanelOpen = false; // focus on measurement panel
         this.applySection();
         if (this.viewer) {
@@ -1373,6 +1444,9 @@ export default {
         this.$emit('measure:changed', true);
       } else {
         this.measurePanelOpen = !this.measurePanelOpen;
+        if (this.measurePanelOpen) {
+          this.bringToFront('measure');
+        }
       }
     },
 
@@ -1780,6 +1854,224 @@ export default {
       this.showSnackbar('Todas las propiedades copiadas al portapapeles');
     },
 
+    loadSavedPanelPositions() {
+      try {
+        const savedMeasure = localStorage.getItem('ondsel_measure_panel_pos');
+        if (savedMeasure) {
+          const parsed = JSON.parse(savedMeasure);
+          if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
+            this.measurePanelPos = parsed;
+          }
+        }
+      } catch (e) {}
+
+      try {
+        const savedSection = localStorage.getItem('ondsel_section_panel_pos');
+        if (savedSection) {
+          const parsed = JSON.parse(savedSection);
+          if (typeof parsed?.x === 'number' && typeof parsed?.y === 'number') {
+            this.sectionPanelPos = parsed;
+          }
+        }
+      } catch (e) {}
+    },
+
+    clampPanelPositions() {
+      if (!this.$el) return;
+      const containerRect = this.$el.getBoundingClientRect();
+      if (!containerRect.width || !containerRect.height) return;
+
+      const clampCard = (selector, posKey) => {
+        const pos = this[posKey];
+        if (!pos || pos.x === null || pos.y === null) return;
+        const cardEl = this.$el.querySelector(selector);
+        const cardWidth = cardEl ? cardEl.offsetWidth : 350;
+        const cardHeight = cardEl ? cardEl.offsetHeight : 200;
+
+        const maxLeft = Math.max(8, containerRect.width - cardWidth - 8);
+        const maxTop = Math.max(8, containerRect.height - Math.min(cardHeight, 48) - 8);
+
+        let newTop = pos.y;
+        if (newTop + cardHeight > containerRect.height - 8) {
+          newTop = Math.max(8, containerRect.height - cardHeight - 8);
+        }
+        newTop = Math.max(8, Math.min(newTop, maxTop));
+        const newLeft = Math.max(8, Math.min(pos.x, maxLeft));
+
+        this[posKey] = { x: Math.round(newLeft), y: Math.round(newTop) };
+      };
+
+      clampCard('.measurement-panel-card', 'measurePanelPos');
+      clampCard('.section-analysis-card', 'sectionPanelPos');
+    },
+
+    bringToFront(panelType) {
+      this.highestPanelZIndex = Math.max(this.highestPanelZIndex || 15, 15) + 1;
+      if (!this.panelZIndices) {
+        this.panelZIndices = { measure: 15, section: 15 };
+      }
+      this.panelZIndices[panelType] = this.highestPanelZIndex;
+    },
+
+    togglePanelCollapse(panelType) {
+      if (panelType === 'measure') {
+        this.measurePanelCollapsed = !this.measurePanelCollapsed;
+      } else {
+        this.sectionPanelCollapsed = !this.sectionPanelCollapsed;
+      }
+      this.$nextTick(() => {
+        setTimeout(() => {
+          this.clampPanelPositions();
+        }, 250);
+      });
+    },
+
+    startDragPanel(event, panelType) {
+      if (event.button !== 0 && event.pointerType === 'mouse') return;
+      if (event.target && event.target.closest('button, input, select, textarea, .v-btn, .v-switch, .v-btn-toggle')) {
+        return;
+      }
+      event.preventDefault();
+      this.bringToFront(panelType);
+
+      const card = event.currentTarget.closest('.v-card');
+      const container = this.$el;
+      if (!card || !container) return;
+
+      const cardRect = card.getBoundingClientRect();
+      const containerRect = container.getBoundingClientRect();
+
+      const currentLeft = cardRect.left - containerRect.left;
+      const currentTop = cardRect.top - containerRect.top;
+      const startMouseX = event.clientX;
+      const startMouseY = event.clientY;
+
+      this.isDraggingPanel = panelType;
+      card.classList.add('panel-dragging');
+
+      if (this.viewer && this.viewer.controls) {
+        this.viewer.controls.enabled = false;
+      }
+
+      let lastPos = null;
+
+      const onPointerMove = (e) => {
+        const dx = e.clientX - startMouseX;
+        const dy = e.clientY - startMouseY;
+        let newX = currentLeft + dx;
+        let newY = currentTop + dy;
+
+        const maxLeft = Math.max(8, containerRect.width - cardRect.width - 8);
+        const maxTop = Math.max(8, containerRect.height - 40);
+
+        newX = Math.max(8, Math.min(newX, maxLeft));
+        newY = Math.max(8, Math.min(newY, maxTop));
+
+        card.style.left = `${newX}px`;
+        card.style.top = `${newY}px`;
+        card.style.bottom = 'auto';
+
+        lastPos = { x: Math.round(newX), y: Math.round(newY) };
+      };
+
+      const onPointerUp = () => {
+        this.isDraggingPanel = null;
+        card.classList.remove('panel-dragging');
+
+        if (this.viewer && this.viewer.controls) {
+          this.viewer.controls.enabled = true;
+        }
+
+        window.removeEventListener('pointermove', onPointerMove);
+        window.removeEventListener('pointerup', onPointerUp);
+        window.removeEventListener('pointercancel', onPointerUp);
+
+        if (lastPos) {
+          if (panelType === 'measure') {
+            this.measurePanelPos = lastPos;
+          } else {
+            this.sectionPanelPos = lastPos;
+          }
+          try {
+            localStorage.setItem(`ondsel_${panelType}_panel_pos`, JSON.stringify(lastPos));
+          } catch (e) {}
+        }
+      };
+
+      window.addEventListener('pointermove', onPointerMove, { passive: false });
+      window.addEventListener('pointerup', onPointerUp);
+      window.addEventListener('pointercancel', onPointerUp);
+    },
+
+    resetPanelPos(panelType) {
+      if (panelType === 'measure') {
+        this.measurePanelPos = { x: null, y: null };
+      } else {
+        this.sectionPanelPos = { x: null, y: null };
+      }
+      try {
+        localStorage.removeItem(`ondsel_${panelType}_panel_pos`);
+      } catch (e) {}
+      this.showSnackbar('Posición del panel restablecida');
+    },
+
+    getSectionPanelStyle() {
+      const isDragging = this.isDraggingPanel === 'section';
+      const base = {
+        position: 'absolute',
+        width: '350px',
+        maxWidth: 'calc(100vw - 32px)',
+        zIndex: this.panelZIndices?.section || 15,
+        backdropFilter: 'blur(12px)',
+        backgroundColor: 'rgba(var(--v-theme-surface), 0.95)',
+        color: 'rgb(var(--v-theme-on-surface))',
+        border: '1px solid rgba(var(--v-theme-on-surface), 0.12)',
+        boxShadow: isDragging ? '0 12px 40px rgba(0,0,0,0.45)' : '0 8px 32px rgba(0,0,0,0.25)',
+        userSelect: isDragging ? 'none' : 'auto',
+      };
+
+      if (this.sectionPanelPos && this.sectionPanelPos.x !== null && this.sectionPanelPos.y !== null) {
+        base.left = `${this.sectionPanelPos.x}px`;
+        base.top = `${this.sectionPanelPos.y}px`;
+        base.bottom = 'auto';
+      } else {
+        base.bottom = '84px';
+        base.left = '24px';
+        base.top = 'auto';
+      }
+
+      return base;
+    },
+
+    getMeasurePanelStyle() {
+      const isDragging = this.isDraggingPanel === 'measure';
+      const base = {
+        position: 'absolute',
+        width: '390px',
+        maxWidth: 'calc(100vw - 32px)',
+        zIndex: this.panelZIndices?.measure || 15,
+        backdropFilter: 'blur(12px)',
+        backgroundColor: 'rgba(var(--v-theme-surface), 0.96)',
+        color: 'rgb(var(--v-theme-on-surface))',
+        border: '1px solid rgba(var(--v-theme-on-surface), 0.12)',
+        boxShadow: isDragging ? '0 12px 40px rgba(0,0,0,0.45)' : '0 8px 32px rgba(0,0,0,0.25)',
+        userSelect: isDragging ? 'none' : 'auto',
+      };
+
+      if (this.measurePanelPos && this.measurePanelPos.x !== null && this.measurePanelPos.y !== null) {
+        base.left = `${this.measurePanelPos.x}px`;
+        base.top = `${this.measurePanelPos.y}px`;
+        base.bottom = 'auto';
+      } else {
+        const isSectionAtDefault = this.sectionPanelOpen && (!this.sectionPanelPos || this.sectionPanelPos.x === null);
+        base.bottom = '84px';
+        base.left = isSectionAtDefault ? '390px' : '24px';
+        base.top = 'auto';
+      }
+
+      return base;
+    },
+
   }
 }
 </script>
@@ -1790,5 +2082,27 @@ export default {
 }
 .measurement-badges-container {
   pointer-events: none;
+}
+.panel-drag-header {
+  cursor: grab;
+  user-select: none;
+  -webkit-user-select: none;
+}
+.panel-drag-header:active {
+  cursor: grabbing;
+}
+.panel-dragging {
+  cursor: grabbing !important;
+  user-select: none;
+}
+.drag-handle-icon {
+  opacity: 0.5;
+  transition: opacity 0.2s;
+}
+.panel-drag-header:hover .drag-handle-icon {
+  opacity: 0.9;
+}
+.drag-title-area {
+  cursor: grab;
 }
 </style>
