@@ -664,6 +664,15 @@ export class Viewer {
     const curX = event.clientX;
     const curY = event.clientY;
 
+    const dom = this.renderer?.domElement || this.viewport;
+    if (dom && this.pointer) {
+      const rect = dom.getBoundingClientRect();
+      if (rect.width > 0 && rect.height > 0) {
+        this.pointer.x = ((curX - rect.left) / rect.width) * 2 - 1;
+        this.pointer.y = -((curY - rect.top) / rect.height) * 2 + 1;
+      }
+    }
+
     if (!this.lastPointerPos) {
       this.lastPointerPos = { x: curX, y: curY };
     }
@@ -930,6 +939,7 @@ export class Viewer {
     if (!isCurrentlySelected) {
       this.applyHighlightToModelObject(modelObject3d, true);
       this.selectedObjs.push(modelObject3d);
+      this.lastSelectedObject = modelObject3d;
     } else {
       this.applyHighlightToModelObject(modelObject3d, false);
       const index = this.selectedObjs.findIndex(o => o.uuid === modelObject3d.uuid);
@@ -986,9 +996,6 @@ export class Viewer {
         if (c.object3d) c.object3d.visible = false;
       });
     }
-    if (this.selectedObjs.some(o => o.uuid === modelObject.uuid)) {
-      this.selectGivenObject(modelObject, true);
-    }
     this.notifyVisibilityChange(modelObject);
   }
 
@@ -1008,13 +1015,29 @@ export class Viewer {
   }
 
   toggleObjectVisibility(modelObject) {
-    if (!modelObject) return;
+    if (!modelObject) return false;
     const current = modelObject.GetVisibility ? modelObject.GetVisibility() : true;
     if (current) {
       this.hideObject(modelObject);
     } else {
       this.showObject(modelObject);
     }
+    return !current;
+  }
+
+  toggleSelectedVisibility() {
+    if (!this.selectedObjs || this.selectedObjs.length === 0) return null;
+    const objs = [...this.selectedObjs];
+    const anyVisible = objs.some(o => (o.GetVisibility ? o.GetVisibility() : true));
+    const targetVis = !anyVisible;
+    for (const obj of objs) {
+      if (targetVis) {
+        this.showObject(obj);
+      } else {
+        this.hideObject(obj);
+      }
+    }
+    return { targetVis, count: objs.length, firstObj: objs[0], objs };
   }
 
   isolateObject(targetModelObject) {

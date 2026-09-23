@@ -1505,6 +1505,68 @@ export default {
           return;
         }
       }
+
+      if (e.code === 'Space' || e.key === ' ' || e.key === 'Spacebar') {
+        const tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : '';
+        const isTextInput = (tag === 'input' && !['checkbox', 'radio', 'button', 'submit', 'reset'].includes(e.target.type)) ||
+                            tag === 'textarea' ||
+                            tag === 'select' ||
+                            (e.target && e.target.isContentEditable);
+        if (isTextInput) {
+          return;
+        }
+
+        e.preventDefault();
+        e.stopPropagation();
+
+        // 1. If context menu is open on a piece, toggle that piece
+        if (this.contextMenu && this.contextMenu.show && this.contextMenu.modelObject) {
+          const target = this.contextMenu.modelObject;
+          this.togglePartVisibility(target);
+          this.contextMenu.show = false;
+          return;
+        }
+
+        // 2. If one or more pieces are selected in the viewport or tree
+        if (this.viewer && this.viewer.selectedObjs && this.viewer.selectedObjs.length > 0) {
+          const res = this.viewer.toggleSelectedVisibility();
+          if (res) {
+            if (res.count === 1) {
+              const name = res.firstObj.name || (res.firstObj.GetLabel ? res.firstObj.GetLabel() : 'CAD');
+              this.showSnackbar(res.targetVis ? `Pieza visible: ${name}` : `Pieza oculta: ${name}`);
+            } else {
+              this.showSnackbar(res.targetVis ? `${res.count} piezas visibles` : `${res.count} piezas ocultas`);
+            }
+          }
+          return;
+        }
+
+        // 3. If hovering over a piece in the 3D viewport, select and toggle it
+        if (this.viewer && typeof this.viewer.raycastMesh === 'function' && this.viewer.pointer) {
+          const hitMesh = this.viewer.raycastMesh(this.viewer.pointer);
+          if (hitMesh && typeof this.viewer.findModelObjectForThreeObject === 'function') {
+            const modelObj = this.viewer.findModelObjectForThreeObject(hitMesh);
+            if (modelObj) {
+              this.viewer.selectGivenObject(modelObj, true);
+              this.viewer.toggleObjectVisibility(modelObj);
+              const isVis = modelObj.GetVisibility ? modelObj.GetVisibility() : true;
+              const name = modelObj.name || (modelObj.GetLabel ? modelObj.GetLabel() : 'CAD');
+              this.showSnackbar(isVis ? `Pieza visible: ${name}` : `Pieza oculta: ${name}`);
+              return;
+            }
+          }
+        }
+
+        // 4. Fallback: if lastSelectedObject exists and is still in model
+        if (this.viewer && this.viewer.lastSelectedObject) {
+          const obj = this.viewer.lastSelectedObject;
+          this.viewer.toggleObjectVisibility(obj);
+          const isVis = obj.GetVisibility ? obj.GetVisibility() : true;
+          const name = obj.name || (obj.GetLabel ? obj.GetLabel() : 'CAD');
+          this.showSnackbar(isVis ? `Pieza visible: ${name}` : `Pieza oculta: ${name}`);
+          return;
+        }
+      }
     },
 
     init(objUrl) {

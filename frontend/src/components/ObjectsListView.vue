@@ -29,6 +29,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         @click.stop="toggleVisibility(item)"
       />
     </template>
+    <template v-slot:title="{ item }">
+      <span
+        class="cursor-pointer select-none"
+        :class="{ 'text-disabled': !isItemVisible(item) }"
+        @click.stop="objectSelected(item)"
+      >
+        {{ item.title || (item.raw && item.raw.title) }}
+      </span>
+    </template>
     <template v-slot:append="{ item, open }">
       <v-btn
         v-if="linkedObjects.hasOwnProperty(item.realName)"
