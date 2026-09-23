@@ -31,6 +31,134 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         </v-tooltip>
       </v-btn>
 
+      <!-- Navigation Style Menu Button (FreeCAD Touchpad / Orbit / CAD / Blender) -->
+      <v-menu
+        v-model="navMenuOpen"
+        location="top start"
+        :close-on-content-click="false"
+        transition="slide-y-reverse-transition"
+      >
+        <template v-slot:activator="{ props }">
+          <v-btn
+            v-bind="props"
+            variant="elevated"
+            icon
+            size="large"
+            elevation="4"
+            class="mr-2"
+            :style="'background-color: rgba(var(--v-theme-surface), 0.95); color: rgb(var(--v-theme-on-surface)); border: 1px solid rgba(var(--v-theme-on-surface), 0.15);'"
+          >
+            <v-icon :color="'on-surface'">
+              {{ navigationStyle === 'touchpad' ? 'mdi-laptop' : (navigationStyle === 'cad' ? 'mdi-cube-outline' : (navigationStyle === 'blender' ? 'mdi-blender-software' : 'mdi-axis-arrow')) }}
+            </v-icon>
+            <v-tooltip activator="parent" location="top">
+              Navegación 3D: {{ navStyleTitle }} (clic para cambiar estilo)
+            </v-tooltip>
+          </v-btn>
+        </template>
+
+        <v-card width="340" class="pa-2" elevation="8" rounded="lg" style="backdrop-filter: blur(12px); background-color: rgba(var(--v-theme-surface), 0.98);">
+          <div class="px-3 pt-2 pb-1 d-flex align-center justify-space-between">
+            <div class="d-flex align-center">
+              <v-icon size="small" class="mr-2" color="primary">mdi-cursor-move</v-icon>
+              <span class="text-subtitle-2 font-weight-bold">Estilo de Navegación 3D</span>
+            </div>
+            <v-btn icon="mdi-close" variant="text" size="x-small" @click="navMenuOpen = false" />
+          </div>
+          <div class="px-3 pb-2 text-caption text-medium-emphasis">
+            Selecciona el modo de control de cámara (estilo FreeCAD)
+          </div>
+
+          <v-divider class="mb-1" />
+
+          <v-list density="compact" nav class="pa-1">
+            <!-- 1. Touchpad (FreeCAD) -->
+            <v-list-item
+              :active="navigationStyle === 'touchpad'"
+              color="primary"
+              rounded="md"
+              class="mb-1"
+              @click="setNavStyle('touchpad')"
+            >
+              <template v-slot:prepend>
+                <v-icon :color="navigationStyle === 'touchpad' ? 'primary' : undefined">mdi-laptop</v-icon>
+              </template>
+              <v-list-item-title class="font-weight-bold text-body-2 d-flex align-center justify-space-between">
+                <span>Touchpad (FreeCAD)</span>
+                <v-chip size="x-small" color="primary" variant="tonal" class="ml-2 font-weight-bold">Recomendado</v-chip>
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption mt-1" style="line-height: 1.35; white-space: normal;">
+                <span class="font-weight-medium text-primary">Shift + Arrastrar:</span> Desplazar (Pan)<br/>
+                <span class="font-weight-medium text-primary">Alt + Arrastrar:</span> Girar (Rotar)<br/>
+                <span class="text-medium-emphasis">Rueda: Zoom | Clic: Seleccionar / Medir</span>
+              </v-list-item-subtitle>
+            </v-list-item>
+
+            <!-- 2. Estándar (Three.js) -->
+            <v-list-item
+              :active="navigationStyle === 'orbit'"
+              color="primary"
+              rounded="md"
+              class="mb-1"
+              @click="setNavStyle('orbit')"
+            >
+              <template v-slot:prepend>
+                <v-icon :color="navigationStyle === 'orbit' ? 'primary' : undefined">mdi-axis-arrow</v-icon>
+              </template>
+              <v-list-item-title class="font-weight-medium text-body-2">
+                Estándar / Órbita (Three.js)
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption mt-1" style="line-height: 1.35; white-space: normal;">
+                <span class="font-weight-medium">Arrastrar izquierdo:</span> Girar<br/>
+                <span class="font-weight-medium">Shift o Arrastrar der.:</span> Desplazar (Pan)<br/>
+                <span class="text-medium-emphasis">Rueda: Zoom | Clic: Seleccionar</span>
+              </v-list-item-subtitle>
+            </v-list-item>
+
+            <!-- 3. CAD (FreeCAD / OpenCASCADE) -->
+            <v-list-item
+              :active="navigationStyle === 'cad'"
+              color="primary"
+              rounded="md"
+              class="mb-1"
+              @click="setNavStyle('cad')"
+            >
+              <template v-slot:prepend>
+                <v-icon :color="navigationStyle === 'cad' ? 'primary' : undefined">mdi-cube-outline</v-icon>
+              </template>
+              <v-list-item-title class="font-weight-medium text-body-2">
+                CAD (FreeCAD / OpenCASCADE)
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption mt-1" style="line-height: 1.35; white-space: normal;">
+                <span class="font-weight-medium">Botón central:</span> Desplazar (Pan)<br/>
+                <span class="font-weight-medium">Central + Clic Izq:</span> Girar (Rotar)<br/>
+                <span class="text-medium-emphasis">Rueda: Zoom | Clic Izq: Seleccionar</span>
+              </v-list-item-subtitle>
+            </v-list-item>
+
+            <!-- 4. Blender -->
+            <v-list-item
+              :active="navigationStyle === 'blender'"
+              color="primary"
+              rounded="md"
+              @click="setNavStyle('blender')"
+            >
+              <template v-slot:prepend>
+                <v-icon :color="navigationStyle === 'blender' ? 'primary' : undefined">mdi-blender-software</v-icon>
+              </template>
+              <v-list-item-title class="font-weight-medium text-body-2">
+                Blender
+              </v-list-item-title>
+              <v-list-item-subtitle class="text-caption mt-1" style="line-height: 1.35; white-space: normal;">
+                <span class="font-weight-medium">Botón central:</span> Girar (Rotar)<br/>
+                <span class="font-weight-medium">Shift + Central:</span> Desplazar (Pan)<br/>
+                <span class="text-medium-emphasis">Rueda: Zoom | Clic Izq: Seleccionar</span>
+              </v-list-item-subtitle>
+            </v-list-item>
+          </v-list>
+        </v-card>
+      </v-menu>
+
       <!-- Measurement Tool Button -->
       <v-btn
         :color="measureActive ? 'primary' : undefined"
@@ -998,6 +1126,8 @@ export default {
     },
     partPropertiesDialog: false,
     selectedPartProps: null,
+    navigationStyle: (typeof localStorage !== 'undefined' && localStorage.getItem('ondsel_nav_style')) || 'touchpad',
+    navMenuOpen: false,
   }),
   computed: {
     viewport3d: vm => vm.$refs.modelViewer,
@@ -1005,6 +1135,14 @@ export default {
     viewerHeight: (vm) => vm.fullScreen ? window.innerHeight : window.innerHeight - 64,
     isDark() {
       return this.$vuetify?.theme?.global?.name === 'dark' || !!(this.$vuetify?.theme?.current?.dark);
+    },
+    navStyleTitle() {
+      switch (this.navigationStyle) {
+        case 'touchpad': return 'Touchpad (FreeCAD)';
+        case 'cad': return 'CAD (FreeCAD)';
+        case 'blender': return 'Blender';
+        default: return 'Estándar / Órbita';
+      }
     },
     visibleMeasurementBadges() {
       if (!this.measurementBadges) return [];
@@ -1091,6 +1229,9 @@ export default {
       };
       if (typeof this.viewer.setDarkTheme === 'function') {
         this.viewer.setDarkTheme(this.isDark);
+      }
+      if (typeof this.viewer.setNavigationStyle === 'function') {
+        this.viewer.setNavigationStyle(this.navigationStyle);
       }
       this.viewport3d.appendChild(this.viewer.renderer.domElement);
     },
@@ -1200,6 +1341,19 @@ export default {
       this.objUrl = objUrl;
       this.viewer.url = objUrl;
       this.viewer.loadOBJ();
+    },
+
+    setNavStyle(style) {
+      this.navigationStyle = style;
+      try {
+        localStorage.setItem('ondsel_nav_style', style);
+      } catch (_) {}
+      if (this.viewer && typeof this.viewer.setNavigationStyle === 'function') {
+        this.viewer.setNavigationStyle(style);
+      }
+      this.navMenuOpen = false;
+      this.snackbarText = `Navegación 3D: ${this.navStyleTitle}`;
+      this.snackbar = true;
     },
 
     toggleMeasurement() {

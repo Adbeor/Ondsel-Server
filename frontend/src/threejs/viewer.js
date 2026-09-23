@@ -171,6 +171,15 @@ export class Viewer {
     this.importer = new Importer();
     this.model = null;
 
+    let savedNavStyle = 'touchpad';
+    try {
+      savedNavStyle = localStorage.getItem('ondsel_nav_style') || 'touchpad';
+    } catch (_) {}
+    this.navigationStyle = savedNavStyle;
+    this.isShiftDown = false;
+    this.isAltDown = false;
+    this.onNavigationStyleChangedCallback = null;
+
     this.initViewer();
   }
 
@@ -303,6 +312,10 @@ export class Viewer {
 
   initControls() {
     this.controls = new OrbitControls(this.camera, this.renderer.domElement);
+    this.controls.enableDamping = true;
+    this.controls.dampingFactor = 0.08;
+    this.controls.screenSpacePanning = true;
+
     this._isNavigating = false;
     this._hasCameraMoved = false;
 
@@ -316,8 +329,214 @@ export class Viewer {
       setTimeout(() => {
         this._isNavigating = false;
         this._hasCameraMoved = false;
-      }, 100);
+      }, 50);
     });
+
+    // Dynamic capture phase on pointerdown to configure OrbitControls per navigation style & modifiers
+    this.onPointerDownCaptureHandler = this.onPointerDownCapture.bind(this);
+    this.renderer.domElement.addEventListener('pointerdown', this.onPointerDownCaptureHandler, { capture: true });
+
+    // Keyboard modifier tracking for visual cursor updates and smooth pan/rotate
+    this.onKeyDownHandler = this.onKeyDown.bind(this);
+    this.onKeyUpHandler = this.onKeyUp.bind(this);
+    window.addEventListener('keydown', this.onKeyDownHandler);
+    window.addEventListener('keyup', this.onKeyUpHandler);
+
+    this.applyNavigationStyle();
+  }
+
+  setNavigationStyle(style) {
+    if (!['touchpad', 'orbit', 'cad', 'blender'].includes(style)) {
+      style = 'touchpad';
+    }
+    this.navigationStyle = style;
+    try {
+      localStorage.setItem('ondsel_nav_style', style);
+    } catch (_) {}
+    this.applyNavigationStyle();
+    this.updateCursor();
+    if (this.onNavigationStyleChangedCallback) {
+      this.onNavigationStyleChangedCallback(style);
+    }
+  }
+
+  applyNavigationStyle() {
+    if (!this.controls) return;
+    const style = this.navigationStyle || 'touchpad';
+    const isMeasuring = this.measurementTool && this.measurementTool.isActive;
+
+    if (style === 'touchpad') {
+      // In Touchpad style: Left click without modifiers is clean CAD selection (no camera rotation).
+      // Alt + Left Drag = Rotate, Shift + Left Drag = Pan.
+      this.controls.mouseButtons = {
+        LEFT: null,
+        MIDDLE: THREE.MOUSE.DOLLY,
+        RIGHT: THREE.MOUSE.ROTATE
+      };
+      this.controls.enableRotate = true;
+      this.controls.enablePan = true;
+      this.controls.enableZoom = true;
+    } else if (style === 'orbit') {
+      if (isMeasuring) {
+        this.controls.mouseButtons = {
+          LEFT: null,
+          MIDDLE: THREE.MOUSE.DOLLY,
+          RIGHT: THREE.MOUSE.ROTATE
+        };
+      } else {
+        this.controls.mouseButtons = {
+          LEFT: THREE.MOUSE.ROTATE,
+          MIDDLE: THREE.MOUSE.DOLLY,
+          RIGHT: THREE.MOUSE.PAN
+        };
+      }
+      this.controls.enableRotate = true;
+      this.controls.enablePan = true;
+      this.controls.enableZoom = true;
+    } else if (style === 'cad') {
+      this.controls.mouseButtons = {
+        LEFT: null,
+        MIDDLE: THREE.MOUSE.PAN,
+        RIGHT: THREE.MOUSE.ROTATE
+      };
+      this.controls.enableRotate = true;
+      this.controls.enablePan = true;
+      this.controls.enableZoom = true;
+    } else if (style === 'blender') {
+      this.controls.mouseButtons = {
+        LEFT: null,
+        MIDDLE: THREE.MOUSE.ROTATE,
+        RIGHT: THREE.MOUSE.PAN
+      };
+      this.controls.enableRotate = true;
+      this.controls.enablePan = true;
+      this.controls.enableZoom = true;
+    }
+  }
+
+  onPointerDownCapture(event) {
+    if (!this.controls) return;
+    const style = this.navigationStyle || 'touchpad';
+    const isMeasuring = this.measurementTool && this.measurementTool.isActive;
+
+    if (style === 'touchpad') {
+      if (event.button === 0) { // Primary click / touchpad drag
+        if (event.altKey) {
+          // Alt + Drag => Rotate (Girar)
+          this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+          this.controls.enableRotate = true;
+          this.controls.enablePan = false;
+          event.preventDefault(); // Stop Linux / browser Alt window menu
+        } else if (event.shiftKey) {
+          // Shift + Drag => Pan (Desplazar)
+          // In OrbitControls: when mouseButtons.LEFT === ROTATE and shiftKey is true, it triggers PAN!
+          this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+          this.controls.enableRotate = true;
+          this.controls.enablePan = true;
+          event.preventDefault();
+        } else {
+          // Normal click/tap without modifiers: pure selection or CAD picking!
+          // Camera does not move at all!
+          this.controls.mouseButtons.LEFT = null;
+          this.controls.enableRotate = false;
+          this.controls.enablePan = false;
+        }
+      } else if (event.button === 2) {
+        // Right button drag: rotate as convenient backup
+        this.controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
+        this.controls.enableRotate = true;
+      }
+    } else if (style === 'orbit') {
+      if (isMeasuring) {
+        if (event.button === 0) {
+          if (event.shiftKey) {
+            this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+            this.controls.enablePan = true;
+          } else if (event.altKey) {
+            this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+            this.controls.enableRotate = true;
+          } else {
+            this.controls.mouseButtons.LEFT = null;
+          }
+        } else if (event.button === 2) {
+          this.controls.mouseButtons.RIGHT = THREE.MOUSE.ROTATE;
+        }
+      } else {
+        this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
+        this.controls.mouseButtons.RIGHT = THREE.MOUSE.PAN;
+        this.controls.enableRotate = true;
+        this.controls.enablePan = true;
+      }
+    } else if (style === 'cad') {
+      if (event.button === 0) {
+        if (event.buttons & 4) { // Middle button also pressed!
+          this.controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
+        } else {
+          this.controls.mouseButtons.LEFT = null;
+        }
+      } else if (event.button === 1) { // Middle button
+        if (event.shiftKey || event.ctrlKey || (event.buttons & 1)) {
+          this.controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
+        } else {
+          this.controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
+        }
+      }
+    } else if (style === 'blender') {
+      if (event.button === 0) {
+        this.controls.mouseButtons.LEFT = null;
+      } else if (event.button === 1) {
+        if (event.shiftKey) {
+          this.controls.mouseButtons.MIDDLE = THREE.MOUSE.PAN;
+        } else {
+          this.controls.mouseButtons.MIDDLE = THREE.MOUSE.ROTATE;
+        }
+      }
+    }
+  }
+
+  onKeyDown(event) {
+    if (event.key === 'Shift') {
+      this.isShiftDown = true;
+      this.updateCursor();
+    } else if (event.key === 'Alt') {
+      this.isAltDown = true;
+      this.updateCursor();
+    }
+  }
+
+  onKeyUp(event) {
+    if (event.key === 'Shift') {
+      this.isShiftDown = false;
+      this.updateCursor();
+    } else if (event.key === 'Alt') {
+      this.isAltDown = false;
+      this.updateCursor();
+    }
+  }
+
+  updateCursor() {
+    const dom = this.renderer?.domElement;
+    if (!dom) return;
+    const isMeasuring = this.measurementTool && this.measurementTool.isActive;
+    const style = this.navigationStyle || 'touchpad';
+
+    if (style === 'touchpad') {
+      if (this.isShiftDown) {
+        dom.style.cursor = 'move';
+      } else if (this.isAltDown) {
+        dom.style.cursor = 'grab';
+      } else if (isMeasuring) {
+        dom.style.cursor = 'crosshair';
+      } else {
+        dom.style.cursor = 'default';
+      }
+    } else {
+      if (isMeasuring) {
+        dom.style.cursor = (this.isShiftDown || this.isAltDown) ? 'grab' : 'crosshair';
+      } else {
+        dom.style.cursor = 'default';
+      }
+    }
   }
 
   addAxesHelper() {
@@ -376,6 +595,12 @@ export class Viewer {
     }
     if (event.button !== 0) return; // Only process left click
 
+    // Never select if navigation modifiers were active
+    if (this.isShiftDown || this.isAltDown || event.shiftKey || event.altKey) {
+      this.pointerDownPos = null;
+      return;
+    }
+
     const dt = performance.now() - (this.pointerDownTime || 0);
     const pos = this.pointerDownPos || { x: event.clientX, y: event.clientY };
     const dist = Math.hypot(event.clientX - pos.x, event.clientY - pos.y);
@@ -412,6 +637,9 @@ export class Viewer {
 
   onContextMenu(event) {
     event.preventDefault();
+    if (this.isShiftDown || this.isAltDown || event.shiftKey || event.altKey) {
+      return;
+    }
     if (this._isDraggingSectionPlane || (this.sectionTransformControl && (this.sectionTransformControl.dragging || this.sectionTransformControl.axis !== null))) {
       return;
     }
@@ -852,6 +1080,15 @@ export class Viewer {
       this.viewport.removeEventListener('pointermove', this.onPointerMoveHandler);
       this.viewport.removeEventListener('pointerup', this.onPointerUpHandler);
       this.viewport.removeEventListener('contextmenu', this.onContextMenuHandler);
+    }
+    if (this.renderer && this.renderer.domElement && this.onPointerDownCaptureHandler) {
+      this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDownCaptureHandler, { capture: true });
+    }
+    if (this.onKeyDownHandler) {
+      window.removeEventListener('keydown', this.onKeyDownHandler);
+    }
+    if (this.onKeyUpHandler) {
+      window.removeEventListener('keyup', this.onKeyUpHandler);
     }
   }
 

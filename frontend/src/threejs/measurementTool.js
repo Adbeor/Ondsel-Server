@@ -1819,6 +1819,7 @@ export class MeasurementTool {
     this._pointerDownPos = null;
     this._pointerDownTime = 0;
     this._pointerMoved = false;
+    this._moveRaf = null;
 
     this._onPointerDown = (event) => {
       if (event.button === 0) {
@@ -1834,7 +1835,20 @@ export class MeasurementTool {
           this._pointerMoved = true;
         }
       }
-      this.onPointerMove(event);
+
+      // If camera is navigating, rotating, or any button is pressed: SKIP raycasting completely!
+      if (event.buttons !== 0 || (this.viewer && (this.viewer._isNavigating || this.viewer._hasCameraMoved))) {
+        if (this.snapMarker) this.snapMarker.visible = false;
+        if (this.snapMarkerRing) this.snapMarkerRing.visible = false;
+        this.clearHoverFace();
+        return;
+      }
+
+      if (this._moveRaf) return;
+      this._moveRaf = requestAnimationFrame(() => {
+        this._moveRaf = null;
+        this.onPointerMove(event);
+      });
     };
     this._onClick = this.onClick.bind(this);
 
@@ -1899,14 +1913,9 @@ export class MeasurementTool {
       this.scene.add(this.rootGroup);
     }
 
-    // LOCK OrbitControls left-click while measuring so clicks NEVER jerk or rotate the scene!
-    if (this.viewer && this.viewer.controls) {
-      this._savedMouseButtons = { ...this.viewer.controls.mouseButtons };
-      this.viewer.controls.mouseButtons = {
-        LEFT: null, // Left click is purely for CAD feature picking!
-        MIDDLE: THREE.MOUSE.DOLLY, // Middle click or scroll wheel zooms
-        RIGHT: THREE.MOUSE.ROTATE // Right click orbits/rotates the camera freely
-      };
+    // Configure viewer navigation for CAD measurement mode
+    if (this.viewer && typeof this.viewer.applyNavigationStyle === 'function') {
+      this.viewer.applyNavigationStyle();
     }
 
     const dom = this.renderer?.domElement;
@@ -1914,7 +1923,11 @@ export class MeasurementTool {
       dom.addEventListener('pointerdown', this._onPointerDown, false);
       dom.addEventListener('pointermove', this._onPointerMove, false);
       dom.addEventListener('click', this._onClick, false);
-      dom.style.cursor = 'crosshair';
+      if (this.viewer && typeof this.viewer.updateCursor === 'function') {
+        this.viewer.updateCursor();
+      } else {
+        dom.style.cursor = 'crosshair';
+      }
     }
 
     this.updateDefaultPrompt();
@@ -1924,6 +1937,11 @@ export class MeasurementTool {
 
   deactivate() {
     if (!this.isActive) return;
+
+    if (this._moveRaf) {
+      cancelAnimationFrame(this._moveRaf);
+      this._moveRaf = null;
+    }
 
     // Commit any completed measurement before closing if user wants to keep measurements
     if (this.keepMeasurementsOnExit) {
@@ -1944,10 +1962,9 @@ export class MeasurementTool {
     if (this.snapMarkerRing) this.snapMarkerRing.visible = false;
     this.clearHoverFace();
 
-    // Restore standard OrbitControls mouse buttons
-    if (this.viewer && this.viewer.controls && this._savedMouseButtons) {
-      this.viewer.controls.mouseButtons = { ...this._savedMouseButtons };
-      this._savedMouseButtons = null;
+    // Restore viewer navigation style
+    if (this.viewer && typeof this.viewer.applyNavigationStyle === 'function') {
+      this.viewer.applyNavigationStyle();
     }
 
     const dom = this.renderer?.domElement;
@@ -1955,7 +1972,11 @@ export class MeasurementTool {
       dom.removeEventListener('pointerdown', this._onPointerDown, false);
       dom.removeEventListener('pointermove', this._onPointerMove, false);
       dom.removeEventListener('click', this._onClick, false);
-      dom.style.cursor = 'default';
+      if (this.viewer && typeof this.viewer.updateCursor === 'function') {
+        this.viewer.updateCursor();
+      } else {
+        dom.style.cursor = 'default';
+      }
     }
     this._pointerDownPos = null;
     this._pointerMoved = false;
@@ -2326,6 +2347,7 @@ export class MeasurementTool {
   onClick(event) {
     if (!this.isActive || !this.viewer || !this.viewer.obj || !this.camera) return;
     if (event.button !== undefined && event.button !== 0) return; // Only left-click
+    if (event.shiftKey || event.altKey) return; // Do not pick CAD features if navigating with Shift or Alt!
 
     // Reject drag, long-press hold, or camera navigation
     if (this._pointerMoved) return;
