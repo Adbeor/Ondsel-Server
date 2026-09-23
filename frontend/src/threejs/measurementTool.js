@@ -1749,6 +1749,7 @@ export class MeasurementTool {
     // Click debouncing
     this.lastClickTime = 0;
     this.raycaster = new THREE.Raycaster();
+    this._tempOrigin = new THREE.Vector3();
 
     // Backup of controls mouse buttons to restore on deactivate
     this._savedMouseButtons = null;
@@ -2296,13 +2297,70 @@ export class MeasurementTool {
     return 100;
   }
 
-  getSnapThreshold(worldPoint) {
-    if (!this.camera || !this.renderer) return 5.0;
-    const camDist = this.camera.position.distanceTo(worldPoint);
+  /**
+   * Calculates world units (millimeters) per screen pixel at a given 3D world point.
+   * Handles perspective and orthographic camera projections smoothly.
+   */
+  getWorldUnitsPerPixel(worldPoint) {
+    if (!this.camera || !this.renderer) return 0.05;
+    const dom = this.renderer.domElement;
+    const canvasHeight = Math.max(100, dom?.clientHeight || window.innerHeight);
+    if (this.camera.isOrthographicCamera) {
+      const zoom = Math.max(1e-4, this.camera.zoom || 1.0);
+      return Math.abs(this.camera.top - this.camera.bottom) / (zoom * canvasHeight);
+    }
+    const pt = worldPoint || this.viewer?.controls?.target || this._tempOrigin;
+    const camDist = Math.max(0.1, this.camera.position.distanceTo(pt));
     const fovRad = ((this.camera.fov || 45) * Math.PI) / 180.0;
-    const canvasHeight = Math.max(100, this.renderer.domElement.clientHeight);
-    const worldPerPixel = (2.0 * Math.tan(fovRad / 2.0) * camDist) / canvasHeight;
-    return Math.max(1.0, Math.min(25.0, worldPerPixel * 16.0));
+    return (2.0 * Math.tan(fovRad / 2.0) * camDist) / canvasHeight;
+  }
+
+  /**
+   * Dynamically scales a CAD highlight/cota mesh (rod cylinder or marker sphere)
+   * so that it retains an optimal, clean pixel thickness on screen and never
+   * overpowers small features or swallows short edges.
+   */
+  updateAdaptiveMesh(mesh) {
+    if (!mesh || !mesh.userData || !mesh.userData.adaptive) return;
+    const ad = mesh.userData.adaptive;
+
+    const wpp = this.getWorldUnitsPerPixel(ad.worldPoint);
+    let targetR = wpp * (ad.targetPixels || 2.0);
+
+    // Dynamic capping based on feature size (edge length, hole radius, etc.)
+    if (ad.featureLength > 0 && ad.maxRatio > 0) {
+      targetR = Math.min(targetR, ad.featureLength * ad.maxRatio);
+    }
+
+    const minW = ad.minWorld !== undefined ? ad.minWorld : 0.015;
+    const maxW = ad.maxWorld !== undefined ? ad.maxWorld : 2.0;
+    targetR = Math.max(minW, Math.min(maxW, targetR));
+
+    const s = targetR / (ad.baseRadius || 1.0);
+    if (ad.type === 'rod') {
+      mesh.scale.set(s, 1.0, s);
+    } else {
+      mesh.scale.set(s, s, s);
+    }
+  }
+
+  /**
+   * Traverses all active measurement and hover groups to dynamically adapt
+   * line widths and marker handle sizes as the camera zooms or moves.
+   */
+  updateAdaptiveVisualScales() {
+    if (!this.camera || !this.renderer || !this.rootGroup) return;
+
+    this.rootGroup.traverse((obj) => {
+      if (obj && obj.userData && obj.userData.adaptive) {
+        this.updateAdaptiveMesh(obj);
+      }
+    });
+  }
+
+  getSnapThreshold(worldPoint) {
+    const wpp = this.getWorldUnitsPerPixel(worldPoint);
+    return Math.max(1.0, Math.min(25.0, wpp * 16.0));
   }
 
   getPointerNDC(event) {
@@ -3924,22 +3982,56 @@ export class MeasurementTool {
       }
 
       if (perpDist >= 0.05) {
-        const dimRod = createThickLineMesh(ptA, ptB, 0.5, this.getDimensionColor(), !this.xray, true);
+        const dist = ptA.distanceTo(ptB);
+        const mid = new THREE.Vector3().addVectors(ptA, ptB).multiplyScalar(0.5);
+        const dimRod = createThickLineMesh(ptA, ptB, 1.0, this.getDimensionColor(), !this.xray, true);
+        dimRod.userData.adaptive = {
+          type: 'rod',
+          worldPoint: mid,
+          featureLength: dist,
+          targetPixels: 1.8,
+          maxRatio: 0.025,
+          minWorld: 0.015,
+          maxWorld: 1.2,
+          baseRadius: 1.0
+        };
+        this.updateAdaptiveMesh(dimRod);
         group.add(dimRod);
 
-        const markerGeom = new THREE.SphereGeometry(0.8, 16, 16);
+        const markerGeom = new THREE.SphereGeometry(1.0, 16, 16);
         const markerMat = new THREE.MeshBasicMaterial({ color: this.getDimensionColor(), depthTest: !this.xray });
         const mA = new THREE.Mesh(markerGeom, markerMat);
         mA.position.copy(ptA);
         mA.userData.isDimensionLine = true;
+        mA.userData.adaptive = {
+          type: 'sphere',
+          worldPoint: ptA.clone(),
+          featureLength: dist,
+          targetPixels: 3.6,
+          maxRatio: 0.075,
+          minWorld: 0.03,
+          maxWorld: 1.8,
+          baseRadius: 1.0
+        };
+        this.updateAdaptiveMesh(mA);
         group.add(mA);
 
         const mB = new THREE.Mesh(markerGeom, markerMat);
         mB.position.copy(ptB);
         mB.userData.isDimensionLine = true;
+        mB.userData.adaptive = {
+          type: 'sphere',
+          worldPoint: ptB.clone(),
+          featureLength: dist,
+          targetPixels: 3.6,
+          maxRatio: 0.075,
+          minWorld: 0.03,
+          maxWorld: 1.8,
+          baseRadius: 1.0
+        };
+        this.updateAdaptiveMesh(mB);
         group.add(mB);
 
-        const mid = new THREE.Vector3().addVectors(ptA, ptB).multiplyScalar(0.5);
         this.badges = [{
           id: 'measure-main',
           worldPos: mid.clone(),
@@ -3961,19 +4053,53 @@ export class MeasurementTool {
     } else {
       const res = closestPointsBetweenSegments(edge1.p1, edge1.p2, edge2.p1, edge2.p2);
       if (res.dist > 0.05) {
-        const dimRod = createThickLineMesh(res.pt1, res.pt2, 0.5, this.getDimensionColor(), !this.xray, true);
+        const mid = new THREE.Vector3().addVectors(res.pt1, res.pt2).multiplyScalar(0.5);
+        const dimRod = createThickLineMesh(res.pt1, res.pt2, 1.0, this.getDimensionColor(), !this.xray, true);
+        dimRod.userData.adaptive = {
+          type: 'rod',
+          worldPoint: mid,
+          featureLength: res.dist,
+          targetPixels: 1.8,
+          maxRatio: 0.025,
+          minWorld: 0.015,
+          maxWorld: 1.2,
+          baseRadius: 1.0
+        };
+        this.updateAdaptiveMesh(dimRod);
         group.add(dimRod);
 
-        const markerGeom = new THREE.SphereGeometry(0.8, 16, 16);
+        const markerGeom = new THREE.SphereGeometry(1.0, 16, 16);
         const markerMat = new THREE.MeshBasicMaterial({ color: this.getDimensionColor(), depthTest: !this.xray });
         const mA = new THREE.Mesh(markerGeom, markerMat);
         mA.position.copy(res.pt1);
         mA.userData.isDimensionLine = true;
+        mA.userData.adaptive = {
+          type: 'sphere',
+          worldPoint: res.pt1.clone(),
+          featureLength: res.dist,
+          targetPixels: 3.6,
+          maxRatio: 0.075,
+          minWorld: 0.03,
+          maxWorld: 1.8,
+          baseRadius: 1.0
+        };
+        this.updateAdaptiveMesh(mA);
         group.add(mA);
 
         const mB = new THREE.Mesh(markerGeom, markerMat);
         mB.position.copy(res.pt2);
         mB.userData.isDimensionLine = true;
+        mB.userData.adaptive = {
+          type: 'sphere',
+          worldPoint: res.pt2.clone(),
+          featureLength: res.dist,
+          targetPixels: 3.6,
+          maxRatio: 0.075,
+          minWorld: 0.03,
+          maxWorld: 1.8,
+          baseRadius: 1.0
+        };
+        this.updateAdaptiveMesh(mB);
         group.add(mB);
       }
 
@@ -4522,10 +4648,8 @@ export class MeasurementTool {
     // 3. Central click pin, crosshairs, and axis line (only for locked selections, not hover)
     if (!isHover) {
       const center = topCenter;
-      const pinR = Math.max(0.6, Math.min(1.2, cylData.radius * 0.04));
-
       // Center marker
-      const pinGeom = new THREE.SphereGeometry(pinR, 16, 16);
+      const pinGeom = new THREE.SphereGeometry(1.0, 16, 16);
       const pinMat = new THREE.MeshBasicMaterial({
         color: colorHex,
         depthTest: !this.xray,
@@ -4537,6 +4661,17 @@ export class MeasurementTool {
       const pin = new THREE.Mesh(pinGeom, pinMat);
       pin.position.copy(center);
       pin.renderOrder = 3020;
+      pin.userData.adaptive = {
+        type: 'sphere',
+        worldPoint: center.clone(),
+        featureLength: cylData.radius * 2,
+        targetPixels: 3.5,
+        maxRatio: 0.06,
+        minWorld: 0.03,
+        maxWorld: 1.5,
+        baseRadius: 1.0
+      };
+      this.updateAdaptiveMesh(pin);
       group.add(pin);
 
       // Center crosshairs along U and V (subtle visible rods scaled with radius)
@@ -4586,9 +4721,7 @@ export class MeasurementTool {
     const radialClearance = Math.abs(cyl1.radius - cyl2.radius) - axisDist;
 
     // 1. Solid dimension rod connecting centers or concentric rims
-    const rodR = Math.max(0.55, Math.min(0.95, minR * 0.035));
-    const markerR = Math.max(0.75, Math.min(1.4, minR * 0.045));
-    const markerGeom = new THREE.SphereGeometry(markerR, 16, 16);
+    const markerGeom = new THREE.SphereGeometry(1.0, 16, 16);
     const markerMat = new THREE.MeshBasicMaterial({
       color: this.getDimensionColor(),
       depthTest: !this.xray,
@@ -4614,17 +4747,95 @@ export class MeasurementTool {
       const uDir = (cyl1.U || cyl2.U || new THREE.Vector3(1, 0, 0)).clone().normalize();
       const ptInner = C1.clone().addScaledVector(uDir, minR);
       const ptOuter = C1.clone().addScaledVector(uDir, maxR);
-      const dimLine = createThickLineMesh(ptInner, ptOuter, rodR, this.getDimensionColor(), !this.xray, true);
+      const dist = ptInner.distanceTo(ptOuter);
+      const mid = new THREE.Vector3().addVectors(ptInner, ptOuter).multiplyScalar(0.5);
+
+      const dimLine = createThickLineMesh(ptInner, ptOuter, 1.0, this.getDimensionColor(), !this.xray, true);
+      dimLine.userData.adaptive = {
+        type: 'rod',
+        worldPoint: mid,
+        featureLength: dist,
+        targetPixels: 1.8,
+        maxRatio: 0.035,
+        minWorld: 0.015,
+        maxWorld: 1.2,
+        baseRadius: 1.0
+      };
+      this.updateAdaptiveMesh(dimLine);
       group.add(dimLine);
+
       m1.position.copy(ptInner);
+      m1.userData.adaptive = {
+        type: 'sphere',
+        worldPoint: ptInner.clone(),
+        featureLength: dist,
+        targetPixels: 3.6,
+        maxRatio: 0.075,
+        minWorld: 0.03,
+        maxWorld: 1.8,
+        baseRadius: 1.0
+      };
+      this.updateAdaptiveMesh(m1);
+
       m2.position.copy(ptOuter);
-      badgePos = ptInner.clone().add(ptOuter).multiplyScalar(0.5);
+      m2.userData.adaptive = {
+        type: 'sphere',
+        worldPoint: ptOuter.clone(),
+        featureLength: dist,
+        targetPixels: 3.6,
+        maxRatio: 0.075,
+        minWorld: 0.03,
+        maxWorld: 1.8,
+        baseRadius: 1.0
+      };
+      this.updateAdaptiveMesh(m2);
+
+      badgePos = mid;
       badgeText = `Holgura: ${radialClearance.toFixed(2)} mm (ΔØ ${deltaDia.toFixed(2)} mm)`;
     } else {
-      const dimLine = createThickLineMesh(C1, C2, rodR, this.getDimensionColor(), !this.xray, true);
+      const dist = C1.distanceTo(C2);
+      const mid = new THREE.Vector3().addVectors(C1, C2).multiplyScalar(0.5);
+
+      const dimLine = createThickLineMesh(C1, C2, 1.0, this.getDimensionColor(), !this.xray, true);
+      dimLine.userData.adaptive = {
+        type: 'rod',
+        worldPoint: mid,
+        featureLength: dist,
+        targetPixels: 1.8,
+        maxRatio: 0.025,
+        minWorld: 0.015,
+        maxWorld: 1.2,
+        baseRadius: 1.0
+      };
+      this.updateAdaptiveMesh(dimLine);
       group.add(dimLine);
+
       m1.position.copy(C1);
+      m1.userData.adaptive = {
+        type: 'sphere',
+        worldPoint: C1.clone(),
+        featureLength: dist,
+        targetPixels: 3.6,
+        maxRatio: 0.075,
+        minWorld: 0.03,
+        maxWorld: 1.8,
+        baseRadius: 1.0
+      };
+      this.updateAdaptiveMesh(m1);
+
       m2.position.copy(C2);
+      m2.userData.adaptive = {
+        type: 'sphere',
+        worldPoint: C2.clone(),
+        featureLength: dist,
+        targetPixels: 3.6,
+        maxRatio: 0.075,
+        minWorld: 0.03,
+        maxWorld: 1.8,
+        baseRadius: 1.0
+      };
+      this.updateAdaptiveMesh(m2);
+
       if (isNested) {
         badgeText = `Holgura: ${Math.max(0, radialClearance).toFixed(2)} mm | Ejes: ${axisDist.toFixed(2)} mm`;
       }
@@ -4759,8 +4970,7 @@ export class MeasurementTool {
       const point = faceData.hitPoint;
       const normal = faceData.normal;
 
-      const pinR = 1.0;
-      const pinGeom = new THREE.SphereGeometry(pinR, 16, 16);
+      const pinGeom = new THREE.SphereGeometry(1.0, 16, 16);
       const pinMat = new THREE.MeshBasicMaterial({
         color: colorHex,
         depthTest: !this.xray,
@@ -4772,6 +4982,15 @@ export class MeasurementTool {
       const pin = new THREE.Mesh(pinGeom, pinMat);
       pin.position.copy(point);
       pin.renderOrder = 3015;
+      pin.userData.adaptive = {
+        type: 'sphere',
+        worldPoint: point.clone(),
+        targetPixels: 3.5,
+        minWorld: 0.03,
+        maxWorld: 1.5,
+        baseRadius: 1.0
+      };
+      this.updateAdaptiveMesh(pin);
       group.add(pin);
 
       // Normal vector arrow
@@ -4801,22 +5020,34 @@ export class MeasurementTool {
 
   /**
    * Prominent visual CAD straight edge / line highlight:
-   * Thick cylindrical 3D rod along the arista with spherical end caps
+   * Volumetric cylindrical 3D rod along the arista with spherical end caps.
+   * Dynamically adapts to camera distance (zoom) and object size (edge length).
    */
   renderCADEdgeHighlight(edgeData, colorHex, isHover = false, stepNumber = '1') {
     const group = new THREE.Group();
     group.name = isHover ? 'hoverEdgeHighlight' : `edgeHighlight_${stepNumber}`;
 
-    const rodR = isHover ? 0.75 : 1.1;
-    const endSphereR = isHover ? 1.2 : 1.6;
+    const edgeLength = edgeData.length || (edgeData.p1 && edgeData.p2 ? edgeData.p1.distanceTo(edgeData.p2) : 10.0);
+    const mid = edgeData.midpoint ? edgeData.midpoint.clone() : edgeData.p1.clone();
 
     // 1. Solid cylindrical rod along the straight CAD edge
-    const rod = createThickLineMesh(edgeData.p1, edgeData.p2, rodR, colorHex, !this.xray, true);
+    const rod = createThickLineMesh(edgeData.p1, edgeData.p2, 1.0, colorHex, !this.xray, true);
     rod.renderOrder = isHover ? 3010 : 3014;
+    rod.userData.adaptive = {
+      type: 'rod',
+      worldPoint: mid,
+      featureLength: edgeLength,
+      targetPixels: isHover ? 1.4 : 1.8,
+      maxRatio: 0.025, // At most 2.5% of edge length radius (5% diameter)
+      minWorld: 0.015,
+      maxWorld: 1.2,
+      baseRadius: 1.0
+    };
+    this.updateAdaptiveMesh(rod);
     group.add(rod);
 
     // 2. Spherical end markers
-    const sphereGeom = new THREE.SphereGeometry(endSphereR, 16, 16);
+    const sphereGeom = new THREE.SphereGeometry(1.0, 16, 16);
     const sphereMat = new THREE.MeshBasicMaterial({
       color: colorHex,
       depthTest: !this.xray,
@@ -4829,19 +5060,51 @@ export class MeasurementTool {
     const m1 = new THREE.Mesh(sphereGeom, sphereMat);
     m1.position.copy(edgeData.p1);
     m1.renderOrder = isHover ? 3011 : 3015;
+    m1.userData.adaptive = {
+      type: 'sphere',
+      worldPoint: edgeData.p1.clone(),
+      featureLength: edgeLength,
+      targetPixels: isHover ? 2.8 : 3.6,
+      maxRatio: 0.075, // At most 7.5% of edge length radius (15% diameter)
+      minWorld: 0.03,
+      maxWorld: 1.8,
+      baseRadius: 1.0
+    };
+    this.updateAdaptiveMesh(m1);
     group.add(m1);
 
     const m2 = new THREE.Mesh(sphereGeom, sphereMat);
     m2.position.copy(edgeData.p2);
     m2.renderOrder = isHover ? 3011 : 3015;
+    m2.userData.adaptive = {
+      type: 'sphere',
+      worldPoint: edgeData.p2.clone(),
+      featureLength: edgeLength,
+      targetPixels: isHover ? 2.8 : 3.6,
+      maxRatio: 0.075,
+      minWorld: 0.03,
+      maxWorld: 1.8,
+      baseRadius: 1.0
+    };
+    this.updateAdaptiveMesh(m2);
     group.add(m2);
 
-    // 3. Central selection pin with step badge (if locked selection)
-    if (!isHover && edgeData.midpoint) {
-      const pinGeom = new THREE.SphereGeometry(1.2, 16, 16);
-      const pin = new THREE.Mesh(pinGeom, sphereMat);
+    // 3. Central selection pin (only rendered if edge is long enough >= 25mm to avoid overlap/clutter)
+    if (!isHover && edgeData.midpoint && edgeLength >= 25.0) {
+      const pin = new THREE.Mesh(sphereGeom, sphereMat);
       pin.position.copy(edgeData.midpoint);
       pin.renderOrder = 3016;
+      pin.userData.adaptive = {
+        type: 'sphere',
+        worldPoint: edgeData.midpoint.clone(),
+        featureLength: edgeLength,
+        targetPixels: 2.4,
+        maxRatio: 0.035,
+        minWorld: 0.02,
+        maxWorld: 1.0,
+        baseRadius: 1.0
+      };
+      this.updateAdaptiveMesh(pin);
       group.add(pin);
     }
 
@@ -4902,8 +5165,7 @@ export class MeasurementTool {
     quadMesh.add(edgesLine);
 
     // 3. Central click pin
-    const pinR = 1.0;
-    const pinGeom = new THREE.SphereGeometry(pinR, 16, 16);
+    const pinGeom = new THREE.SphereGeometry(1.0, 16, 16);
     const pinMat = new THREE.MeshBasicMaterial({
       color: colorHex,
       depthTest: !this.xray,
@@ -4915,6 +5177,15 @@ export class MeasurementTool {
     const pin = new THREE.Mesh(pinGeom, pinMat);
     pin.position.copy(point);
     pin.renderOrder = 3012;
+    pin.userData.adaptive = {
+      type: 'sphere',
+      worldPoint: point.clone(),
+      targetPixels: 3.5,
+      minWorld: 0.03,
+      maxWorld: 1.5,
+      baseRadius: 1.0
+    };
+    this.updateAdaptiveMesh(pin);
     group.add(pin);
 
     // 4. Normal vector arrow indicating plane orientation
@@ -4958,14 +5229,25 @@ export class MeasurementTool {
       const { Q2, Q1 } = this.findVisiblePlanesAnchor(P1, n1, P2, signedDist, face1, face2, plane);
 
       if (perpDist >= 0.05) {
+        const mid = new THREE.Vector3().addVectors(Q2, Q1).multiplyScalar(0.5);
         // 1. Solid perpendicular dimension rod
-        const perpLine = createThickLineMesh(Q2, Q1, 0.85, this.getDimensionColor(), !this.xray, true);
+        const perpLine = createThickLineMesh(Q2, Q1, 1.0, this.getDimensionColor(), !this.xray, true);
         perpLine.name = 'dimRod';
+        perpLine.userData.adaptive = {
+          type: 'rod',
+          worldPoint: mid,
+          featureLength: perpDist,
+          targetPixels: 1.8,
+          maxRatio: 0.025,
+          minWorld: 0.015,
+          maxWorld: 1.2,
+          baseRadius: 1.0
+        };
+        this.updateAdaptiveMesh(perpLine);
         group.add(perpLine);
 
         // 2. Dimension end markers at Q2 and Q1
-        const markerR = 1.25;
-        const markerGeom = new THREE.SphereGeometry(markerR, 16, 16);
+        const markerGeom = new THREE.SphereGeometry(1.0, 16, 16);
         const markerMat = new THREE.MeshBasicMaterial({
           color: this.getDimensionColor(),
           depthTest: !this.xray,
@@ -4980,6 +5262,17 @@ export class MeasurementTool {
         mP2.name = 'markerQ2';
         mP2.userData.isDimensionLine = true;
         mP2.renderOrder = 3021;
+        mP2.userData.adaptive = {
+          type: 'sphere',
+          worldPoint: Q2.clone(),
+          featureLength: perpDist,
+          targetPixels: 3.6,
+          maxRatio: 0.075,
+          minWorld: 0.03,
+          maxWorld: 1.8,
+          baseRadius: 1.0
+        };
+        this.updateAdaptiveMesh(mP2);
         group.add(mP2);
 
         const mProj = new THREE.Mesh(markerGeom, markerMat);
@@ -4987,6 +5280,17 @@ export class MeasurementTool {
         mProj.name = 'markerQ1';
         mProj.userData.isDimensionLine = true;
         mProj.renderOrder = 3021;
+        mProj.userData.adaptive = {
+          type: 'sphere',
+          worldPoint: Q1.clone(),
+          featureLength: perpDist,
+          targetPixels: 3.6,
+          maxRatio: 0.075,
+          minWorld: 0.03,
+          maxWorld: 1.8,
+          baseRadius: 1.0
+        };
+        this.updateAdaptiveMesh(mProj);
         group.add(mProj);
 
         // 3. Extension projection reference line on Plane 1 (if P1 is visible and displaced from Q1)
@@ -5053,9 +5357,7 @@ export class MeasurementTool {
    * Prominent visual marker pin for P1 or P2
    */
   renderPointMarker(point, colorHex, labelNumber) {
-    const scale = Math.max(0.6, this.getSnapThreshold(point) * 0.18);
-    const r = 1.0;
-    const geom = new THREE.SphereGeometry(r, 16, 16);
+    const geom = new THREE.SphereGeometry(1.0, 16, 16);
     const mat = new THREE.MeshBasicMaterial({
       color: colorHex,
       depthTest: !this.xray,
@@ -5066,12 +5368,20 @@ export class MeasurementTool {
     });
     const sphere = new THREE.Mesh(geom, mat);
     sphere.position.copy(point);
-    sphere.scale.set(scale, scale, scale);
     sphere.renderOrder = 3010;
+    sphere.userData.adaptive = {
+      type: 'sphere',
+      worldPoint: point.clone(),
+      targetPixels: 4.0,
+      minWorld: 0.03,
+      maxWorld: 2.0,
+      baseRadius: 1.0
+    };
+    this.updateAdaptiveMesh(sphere);
     this.selectionGroup.add(sphere);
 
     // Subtle billboarded outer ring
-    const ringGeom = new THREE.RingGeometry(r * 1.3, r * 1.8, 32);
+    const ringGeom = new THREE.RingGeometry(1.3, 1.8, 32);
     const ringMat = new THREE.MeshBasicMaterial({
       color: colorHex,
       side: THREE.DoubleSide,
@@ -5097,14 +5407,26 @@ export class MeasurementTool {
   renderDimensionLine(p1, p2, labelText) {
     this.visualsGroup.clear();
     const group = new THREE.Group();
+    const dist = p1.distanceTo(p2);
+    const midpoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
 
     // 1. Solid dimension rod
-    const line = createThickLineMesh(p1, p2, 0.85, this.getDimensionColor(), !this.xray, true);
+    const line = createThickLineMesh(p1, p2, 1.0, this.getDimensionColor(), !this.xray, true);
+    line.userData.adaptive = {
+      type: 'rod',
+      worldPoint: midpoint.clone(),
+      featureLength: dist,
+      targetPixels: 1.8,
+      maxRatio: 0.025,
+      minWorld: 0.015,
+      maxWorld: 1.2,
+      baseRadius: 1.0
+    };
+    this.updateAdaptiveMesh(line);
     group.add(line);
 
     // 2. End markers (crisp CAD terminal dots)
-    const markerR = 1.25;
-    const markerGeom = new THREE.SphereGeometry(markerR, 16, 16);
+    const markerGeom = new THREE.SphereGeometry(1.0, 16, 16);
     const markerMat = new THREE.MeshBasicMaterial({
       color: this.getDimensionColor(),
       depthTest: !this.xray,
@@ -5118,18 +5440,39 @@ export class MeasurementTool {
     m1.position.copy(p1);
     m1.userData.isDimensionLine = true;
     m1.renderOrder = 3026;
+    m1.userData.adaptive = {
+      type: 'sphere',
+      worldPoint: p1.clone(),
+      featureLength: dist,
+      targetPixels: 3.6,
+      maxRatio: 0.075,
+      minWorld: 0.03,
+      maxWorld: 1.8,
+      baseRadius: 1.0
+    };
+    this.updateAdaptiveMesh(m1);
     group.add(m1);
 
     const m2 = new THREE.Mesh(markerGeom, markerMat);
     m2.position.copy(p2);
     m2.userData.isDimensionLine = true;
     m2.renderOrder = 3026;
+    m2.userData.adaptive = {
+      type: 'sphere',
+      worldPoint: p2.clone(),
+      featureLength: dist,
+      targetPixels: 3.6,
+      maxRatio: 0.075,
+      minWorld: 0.03,
+      maxWorld: 1.8,
+      baseRadius: 1.0
+    };
+    this.updateAdaptiveMesh(m2);
     group.add(m2);
 
     this.visualsGroup.add(group);
 
     // 3. Floating 3D Badge at line midpoint
-    const midpoint = new THREE.Vector3().addVectors(p1, p2).multiplyScalar(0.5);
     this.badges = [{
       id: 'measure-main',
       worldPos: midpoint.clone(),
@@ -5228,6 +5571,9 @@ export class MeasurementTool {
    * Called every frame from requestAnimationFrame in viewer.js
    */
   update() {
+    // 0. Continuously update scales of 3D adaptive visual elements (rods, spheres, handles)
+    this.updateAdaptiveVisualScales();
+
     // 1. Synchronize visibility of saved measurements and their 3D groups
     if (this.savedMeasurements && this.savedMeasurements.length > 0) {
       for (let i = 0; i < this.savedMeasurements.length; i++) {
