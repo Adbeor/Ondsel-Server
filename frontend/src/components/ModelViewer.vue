@@ -1094,7 +1094,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               :prepend-icon="contextMenu.isVisible ? 'mdi-eye-off' : 'mdi-eye'"
               :title="contextMenu.isVisible ? 'Ocultar pieza' : 'Mostrar pieza'"
               @click="togglePartVisibility(contextMenu.modelObject)"
-            />
+            >
+              <template v-slot:append>
+                <kbd class="text-caption text-medium-emphasis ml-2 px-1 rounded border font-monospace" style="font-size: 11px;">Espacio</kbd>
+              </template>
+            </v-list-item>
 
             <!-- Enfocar pieza en la vista -->
             <v-list-item

@@ -1008,7 +1008,8 @@ export class Viewer {
     if (modelObject.object3d) modelObject.object3d.visible = true;
     if (modelObject.GetAllChildren) {
       modelObject.GetAllChildren().forEach(c => {
-        if (c.object3d) c.object3d.visible = true;
+        const cVis = c.GetVisibility ? c.GetVisibility() : true;
+        if (c.object3d) c.object3d.visible = cVis;
       });
     }
     this.notifyVisibilityChange(modelObject);
@@ -1028,16 +1029,12 @@ export class Viewer {
   toggleSelectedVisibility() {
     if (!this.selectedObjs || this.selectedObjs.length === 0) return null;
     const objs = [...this.selectedObjs];
-    const anyVisible = objs.some(o => (o.GetVisibility ? o.GetVisibility() : true));
-    const targetVis = !anyVisible;
+    // FreeCAD Std_ToggleVisibility: Inverts visibility for each selected object
     for (const obj of objs) {
-      if (targetVis) {
-        this.showObject(obj);
-      } else {
-        this.hideObject(obj);
-      }
+      this.toggleObjectVisibility(obj);
     }
-    return { targetVis, count: objs.length, firstObj: objs[0], objs };
+    const anyVisible = objs.some(o => (o.GetVisibility ? o.GetVisibility() : true));
+    return { targetVis: anyVisible, count: objs.length, firstObj: objs[0], objs };
   }
 
   isolateObject(targetModelObject) {
