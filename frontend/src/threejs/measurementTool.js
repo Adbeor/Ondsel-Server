@@ -1836,8 +1836,9 @@ export class MeasurementTool {
         }
       }
 
-      // If camera is navigating, rotating, or any button is pressed: SKIP raycasting completely!
-      if (event.buttons !== 0 || (this.viewer && (this.viewer._isNavigating || this.viewer._hasCameraMoved))) {
+      // If camera is navigating, rotating, or modifier keys are pressed: SKIP raycasting completely!
+      const isNavModifier = event.shiftKey || event.altKey || (this.viewer && (this.viewer.isShiftDown || this.viewer.isAltDown));
+      if (event.buttons !== 0 || isNavModifier || (this.viewer && (this.viewer._isNavigating || this.viewer._hasCameraMoved))) {
         if (this.snapMarker) this.snapMarker.visible = false;
         if (this.snapMarkerRing) this.snapMarkerRing.visible = false;
         this.clearHoverFace();

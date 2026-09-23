@@ -497,21 +497,99 @@ export class Viewer {
   onKeyDown(event) {
     if (event.key === 'Shift') {
       this.isShiftDown = true;
+      this.lastPointerPos = null;
       this.updateCursor();
     } else if (event.key === 'Alt') {
       this.isAltDown = true;
+      this.lastPointerPos = null;
       this.updateCursor();
+      event.preventDefault(); // Stop browser / window manager Alt menu
     }
   }
 
   onKeyUp(event) {
     if (event.key === 'Shift') {
       this.isShiftDown = false;
+      this.lastPointerPos = null;
       this.updateCursor();
     } else if (event.key === 'Alt') {
       this.isAltDown = false;
+      this.lastPointerPos = null;
       this.updateCursor();
     }
+    this.clearNavigationTimeout();
+  }
+
+  clearNavigationTimeout() {
+    if (this._navTimeout) clearTimeout(this._navTimeout);
+    this._navTimeout = setTimeout(() => {
+      this._isNavigating = false;
+      this._hasCameraMoved = false;
+    }, 60);
+  }
+
+  panCamera(dx, dy) {
+    if (!this.camera || !this.controls || (dx === 0 && dy === 0)) return;
+    const cam = this.camera;
+    const target = this.controls.target;
+    const eye = cam.position.clone().sub(target);
+    const targetDistance = eye.length();
+
+    let factorX, factorY;
+    if (cam.isOrthographicCamera) {
+      factorX = (cam.right - cam.left) / (cam.zoom * (this.width || window.innerWidth));
+      factorY = (cam.top - cam.bottom) / (cam.zoom * (this.height || window.innerHeight));
+    } else {
+      const halfHeight = Math.tan(THREE.MathUtils.degToRad(cam.fov * 0.5)) * targetDistance;
+      const halfWidth = halfHeight * cam.aspect;
+      factorX = (2 * halfWidth) / (this.width || window.innerWidth);
+      factorY = (2 * halfHeight) / (this.height || window.innerHeight);
+    }
+
+    const right = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 0).normalize();
+    const up = new THREE.Vector3().setFromMatrixColumn(cam.matrix, 1).normalize();
+
+    const panOffset = new THREE.Vector3()
+      .addScaledVector(right, -dx * factorX)
+      .addScaledVector(up, dy * factorY);
+
+    cam.position.add(panOffset);
+    target.add(panOffset);
+    this.controls.update();
+  }
+
+  rotateCamera(dx, dy) {
+    if (!this.camera || !this.controls || (dx === 0 && dy === 0)) return;
+    const cam = this.camera;
+    const target = this.controls.target;
+
+    const quat = new THREE.Quaternion().setFromUnitVectors(cam.up, new THREE.Vector3(0, 1, 0));
+    const quatInverse = quat.clone().invert();
+
+    const offset = cam.position.clone().sub(target);
+    offset.applyQuaternion(quat);
+
+    const radius = offset.length();
+    let theta = Math.atan2(offset.x, offset.z);
+    let phi = Math.acos(Math.max(-1, Math.min(1, offset.y / Math.max(1e-4, radius))));
+
+    const speed = 2.0;
+    const w = this.width || window.innerWidth;
+    const h = this.height || window.innerHeight;
+
+    theta -= (2 * Math.PI * dx / w) * speed;
+    phi -= (2 * Math.PI * dy / h) * speed;
+    phi = Math.max(0.01, Math.min(Math.PI - 0.01, phi));
+
+    const sinPhiRadius = Math.sin(phi) * radius;
+    offset.x = sinPhiRadius * Math.sin(theta);
+    offset.y = Math.cos(phi) * radius;
+    offset.z = sinPhiRadius * Math.cos(theta);
+
+    offset.applyQuaternion(quatInverse);
+    cam.position.copy(target).add(offset);
+    cam.lookAt(target);
+    this.controls.update();
   }
 
   updateCursor() {
@@ -578,10 +656,43 @@ export class Viewer {
   }
 
   onPointerMove(event) {
+    const curX = event.clientX;
+    const curY = event.clientY;
+
+    if (!this.lastPointerPos) {
+      this.lastPointerPos = { x: curX, y: curY };
+    }
+
+    const dx = curX - this.lastPointerPos.x;
+    const dy = curY - this.lastPointerPos.y;
+    this.lastPointerPos = { x: curX, y: curY };
+
     if (this.pointerDownPos) {
-      const dist = Math.hypot(event.clientX - this.pointerDownPos.x, event.clientY - this.pointerDownPos.y);
+      const dist = Math.hypot(curX - this.pointerDownPos.x, curY - this.pointerDownPos.y);
       if (dist > 5) {
         this.pointerMoved = true;
+      }
+    }
+
+    // Touchpad Mode: Move pointer freely to Pan (Shift) or Rotate (Alt) without having to click!
+    if (this.navigationStyle === 'touchpad') {
+      const isShift = this.isShiftDown || event.shiftKey;
+      const isAlt = this.isAltDown || event.altKey;
+
+      if (isShift && !isAlt) {
+        // Shift + Pointer Movement => PAN (Desplazar)
+        this.panCamera(dx, dy);
+        this._isNavigating = true;
+        this._hasCameraMoved = true;
+        this.clearNavigationTimeout();
+        return;
+      } else if (isAlt) {
+        // Alt + Pointer Movement => ROTATE (Girar / Orbitar)
+        this.rotateCamera(dx, dy);
+        this._isNavigating = true;
+        this._hasCameraMoved = true;
+        this.clearNavigationTimeout();
+        return;
       }
     }
   }
