@@ -1515,8 +1515,14 @@ export default {
         const isTextInput = (tag === 'input' && !['checkbox', 'radio', 'button', 'submit', 'reset'].includes(e.target.type)) ||
                             tag === 'textarea' ||
                             tag === 'select' ||
-                            (e.target && e.target.isContentEditable);
+                            (e.target && e.target.isContentEditable) ||
+                            (e.target && e.target.closest && e.target.closest('.cm-editor'));
         if (isTextInput) {
+          return;
+        }
+
+        // Do not intercept Space if a modal dialog is open
+        if (this.partPropertiesDialog || (typeof document !== 'undefined' && document.querySelector('.v-overlay--active .v-dialog'))) {
           return;
         }
 
@@ -1539,14 +1545,22 @@ export default {
               const name = res.firstObj.name || (res.firstObj.GetLabel ? res.firstObj.GetLabel() : 'CAD');
               this.showSnackbar(res.targetVis ? `Pieza visible: ${name}` : `Pieza oculta: ${name}`);
             } else {
-              this.showSnackbar(res.targetVis ? `${res.count} piezas visibles` : `${res.count} piezas ocultas`);
+              const visibleCount = res.objs.filter(o => (o.GetVisibility ? o.GetVisibility() : true)).length;
+              const hiddenCount = res.count - visibleCount;
+              if (hiddenCount === 0) {
+                this.showSnackbar(`${res.count} piezas visibles`);
+              } else if (visibleCount === 0) {
+                this.showSnackbar(`${res.count} piezas ocultas`);
+              } else {
+                this.showSnackbar(`Visibilidad alternada (${visibleCount} visibles, ${hiddenCount} ocultas)`);
+              }
             }
           }
           return;
         }
 
         // 3. If hovering over a piece in the 3D viewport, select and toggle it
-        if (this.viewer && typeof this.viewer.raycastMesh === 'function' && this.viewer.pointer) {
+        if (this.viewer && this.viewer.isPointerOver && typeof this.viewer.raycastMesh === 'function' && this.viewer.pointer) {
           const hitMesh = this.viewer.raycastMesh(this.viewer.pointer);
           if (hitMesh && typeof this.viewer.findModelObjectForThreeObject === 'function') {
             const modelObj = this.viewer.findModelObjectForThreeObject(hitMesh);
@@ -1559,16 +1573,6 @@ export default {
               return;
             }
           }
-        }
-
-        // 4. Fallback: if lastSelectedObject exists and is still in model
-        if (this.viewer && this.viewer.lastSelectedObject) {
-          const obj = this.viewer.lastSelectedObject;
-          this.viewer.toggleObjectVisibility(obj);
-          const isVis = obj.GetVisibility ? obj.GetVisibility() : true;
-          const name = obj.name || (obj.GetLabel ? obj.GetLabel() : 'CAD');
-          this.showSnackbar(isVis ? `Pieza visible: ${name}` : `Pieza oculta: ${name}`);
-          return;
         }
       }
     },

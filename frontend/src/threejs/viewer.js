@@ -235,6 +235,17 @@ export class Viewer {
     this.viewport.addEventListener('pointerup', this.onPointerUpHandler);
     this.viewport.addEventListener('contextmenu', this.onContextMenuHandler);
 
+    this.isPointerOver = false;
+    this.onPointerEnterHandler = () => {
+      this.isPointerOver = true;
+    };
+    this.onPointerLeaveHandler = () => {
+      this.isPointerOver = false;
+      this.lastPointerPos = null;
+    };
+    this.renderer.domElement.addEventListener('pointerenter', this.onPointerEnterHandler);
+    this.renderer.domElement.addEventListener('pointerleave', this.onPointerLeaveHandler);
+
     this.animate()
   }
 
@@ -339,8 +350,16 @@ export class Viewer {
     // Keyboard modifier tracking for visual cursor updates and smooth pan/rotate
     this.onKeyDownHandler = this.onKeyDown.bind(this);
     this.onKeyUpHandler = this.onKeyUp.bind(this);
+    this.onBlurHandler = () => {
+      this.isShiftDown = false;
+      this.isAltDown = false;
+      this.isPointerOver = false;
+      this.lastPointerPos = null;
+      this.updateCursor();
+    };
     window.addEventListener('keydown', this.onKeyDownHandler);
     window.addEventListener('keyup', this.onKeyUpHandler);
+    window.addEventListener('blur', this.onBlurHandler);
 
     this.applyNavigationStyle();
   }
@@ -695,6 +714,16 @@ export class Viewer {
       }
     }
 
+    // Auto-correct modifier keys if user released them outside the window or after Alt+Tab
+    if (!event.shiftKey && this.isShiftDown) {
+      this.isShiftDown = false;
+      this.updateCursor();
+    }
+    if (!event.altKey && this.isAltDown) {
+      this.isAltDown = false;
+      this.updateCursor();
+    }
+
     // Touchpad Mode: Move pointer freely to Pan (Shift) or Rotate (Alt) without having to click!
     if (this.navigationStyle === 'touchpad') {
       const isShift = this.isShiftDown || event.shiftKey;
@@ -960,6 +989,7 @@ export class Viewer {
       }
     }
     this.selectedObjs = [];
+    this.lastSelectedObject = null;
   }
 
   notifyVisibilityChange(modelObject = null) {
@@ -1231,14 +1261,25 @@ export class Viewer {
       this.viewport.removeEventListener('pointerup', this.onPointerUpHandler);
       this.viewport.removeEventListener('contextmenu', this.onContextMenuHandler);
     }
-    if (this.renderer && this.renderer.domElement && this.onPointerDownCaptureHandler) {
-      this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDownCaptureHandler, { capture: true });
+    if (this.renderer && this.renderer.domElement) {
+      if (this.onPointerDownCaptureHandler) {
+        this.renderer.domElement.removeEventListener('pointerdown', this.onPointerDownCaptureHandler, { capture: true });
+      }
+      if (this.onPointerEnterHandler) {
+        this.renderer.domElement.removeEventListener('pointerenter', this.onPointerEnterHandler);
+      }
+      if (this.onPointerLeaveHandler) {
+        this.renderer.domElement.removeEventListener('pointerleave', this.onPointerLeaveHandler);
+      }
     }
     if (this.onKeyDownHandler) {
       window.removeEventListener('keydown', this.onKeyDownHandler);
     }
     if (this.onKeyUpHandler) {
       window.removeEventListener('keyup', this.onKeyUpHandler);
+    }
+    if (this.onBlurHandler) {
+      window.removeEventListener('blur', this.onBlurHandler);
     }
   }
 
