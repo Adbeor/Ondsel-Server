@@ -14,10 +14,15 @@ if (typeof window !== 'undefined') {
 // creating static salt-and-pepper noise and breaking manifold parity in stencil capping.
 // Introducing an epsilon tolerance (clipBias) ensures all coplanar fragments evaluate cleanly.
 if (THREE.ShaderChunk && THREE.ShaderChunk.clipping_planes_fragment) {
-  THREE.ShaderChunk.clipping_planes_fragment = THREE.ShaderChunk.clipping_planes_fragment.replace(
-    /if\s*\(\s*dot\(\s*-\s*vViewPosition\s*,\s*plane\.xyz\s*\)\s*>\s*plane\.w\s*\)\s*discard\s*;/g,
-    'float clipDist = dot(-vViewPosition, plane.xyz) - plane.w;\n\t\tif (clipDist > max(1e-4, abs(plane.w) * 1e-5)) discard;'
-  );
+  THREE.ShaderChunk.clipping_planes_fragment = THREE.ShaderChunk.clipping_planes_fragment
+    .replaceAll(
+      'dot( vClipPosition, plane.xyz ) > plane.w',
+      'dot( vClipPosition, plane.xyz ) > ( plane.w + max( 0.001, abs( plane.w ) * 0.0001 ) )'
+    )
+    .replaceAll(
+      'dot( - vViewPosition, plane.xyz ) > plane.w',
+      'dot( - vViewPosition, plane.xyz ) > ( plane.w + max( 0.001, abs( plane.w ) * 0.0001 ) )'
+    );
 }
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
