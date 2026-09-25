@@ -226,12 +226,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           left: (badge.screenX + (badge.offsetX || 0)) + 'px',
           top: (badge.screenY + (badge.offsetY || 0)) + 'px',
           transform: 'translate(-50%, -50%)',
-          pointerEvents: 'auto',
+          pointerEvents: (isBadgeInteractionBlocked && isDraggingBadge !== badge.id) ? 'none' : 'auto',
           cursor: isDraggingBadge === badge.id ? 'grabbing' : 'grab',
           zIndex: isDraggingBadge === badge.id ? 20 : 13
         }"
         @pointerdown="startDragBadge($event, badge)"
         @dblclick.stop="resetBadgeOffset(badge)"
+        @wheel="handleBadgeWheel($event)"
         title="Arrastra para mover la etiqueta y despejar la vista. Doble clic para centrar."
       >
         <v-chip
@@ -251,6 +252,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             class="ml-1"
             style="width: 18px; height: 18px; min-width: 18px; margin-right: -4px;"
             @click.stop="deleteMeasurement(badge.measureId || badge.id)"
+            @pointerdown.stop
             title="Eliminar esta cota"
           >
             <v-icon size="12">mdi-close</v-icon>
@@ -1412,11 +1414,16 @@ export default {
     panelZIndices: { measure: 15, section: 15 },
     highestPanelZIndex: 15,
     minimalistMode: (typeof localStorage !== 'undefined' && localStorage.getItem('ondsel_minimalist_mode') === 'true') || false,
+    isViewerNavigating: false,
+    isNavModifierActive: false,
   }),
   computed: {
     viewport3d: vm => vm.$refs.modelViewer,
     viewerWidth: (vm) => vm.fullScreen ? window.innerWidth : window.innerWidth - 64,
     viewerHeight: (vm) => vm.fullScreen ? window.innerHeight : window.innerHeight - 64,
+    isBadgeInteractionBlocked() {
+      return this.isViewerNavigating || this.isNavModifierActive;
+    },
     isDark() {
       return this.$vuetify?.theme?.global?.name === 'dark' || !!(this.$vuetify?.theme?.current?.dark);
     },
@@ -1444,12 +1451,22 @@ export default {
     }
   },
   mounted() {
+    if (typeof window !== 'undefined') {
+      window.__model_viewer_vm = this;
+    }
     window.addEventListener('keydown', this.handleKeyDown);
+    window.addEventListener('keyup', this.handleKeyUp);
+    window.addEventListener('blur', this.handleBlur);
     this.loadSavedPanelPositions();
     window.addEventListener('resize', this.clampPanelPositions);
   },
   beforeUnmount() {
+    if (typeof window !== 'undefined' && window.__model_viewer_vm === this) {
+      window.__model_viewer_vm = null;
+    }
     window.removeEventListener('keydown', this.handleKeyDown);
+    window.removeEventListener('keyup', this.handleKeyUp);
+    window.removeEventListener('blur', this.handleBlur);
     window.removeEventListener('resize', this.clampPanelPositions);
     if (this.viewer && typeof this.viewer.destroy === 'function') {
       this.viewer.destroy();
@@ -1458,7 +1475,19 @@ export default {
   created() {
   },
   methods: {
+    handleKeyUp(e) {
+      if (e.key === 'Alt' || e.key === 'Shift') {
+        this.isNavModifierActive = (e.altKey || e.shiftKey);
+      }
+    },
+    handleBlur() {
+      this.isNavModifierActive = false;
+      this.isViewerNavigating = false;
+    },
     handleKeyDown(e) {
+      if (e.key === 'Alt' || e.key === 'Shift') {
+        this.isNavModifierActive = true;
+      }
       if (e.key === 'Escape') {
         const tag = e.target && e.target.tagName ? e.target.tagName.toLowerCase() : '';
         if (tag === 'input' || tag === 'textarea' || tag === 'select') {
@@ -1577,6 +1606,12 @@ export default {
         object3d => this.$emit('object:clicked', object3d)
       );
       this.viewer.onContextMenuCallback = this.handleContextMenu.bind(this);
+      this.viewer.onNavigationChange = (isNavigating) => {
+        this.isViewerNavigating = isNavigating;
+      };
+      this.viewer.onModifierChange = (isModifierActive) => {
+        this.isNavModifierActive = isModifierActive;
+      };
       this.viewer.onSectionChangeCallback = ({ offset }) => {
         this.sectionOffset = Number(offset.toFixed(2));
       };
@@ -1831,7 +1866,14 @@ export default {
     },
 
     startDragBadge(event, badge) {
-      if (event.button !== undefined && event.button !== 0) return;
+      if (event.button !== 0 || event.altKey || event.shiftKey) {
+        if (this.viewer && this.viewer.renderer && this.viewer.renderer.domElement) {
+          const dom = this.viewer.renderer.domElement;
+          const simulatedEvent = new PointerEvent(event.type, event);
+          dom.dispatchEvent(simulatedEvent);
+        }
+        return;
+      }
       event.preventDefault();
       event.stopPropagation();
 
@@ -1903,6 +1945,12 @@ export default {
       if (svgLine) svgLine.style.display = 'none';
       const svgDot = document.getElementById('badge-dot-' + badge.id);
       if (svgDot) svgDot.style.display = 'none';
+    },
+
+    handleBadgeWheel(event) {
+      if (this.viewer && this.viewer.renderer && this.viewer.renderer.domElement) {
+        this.viewer.renderer.domElement.dispatchEvent(new WheelEvent('wheel', event));
+      }
     },
 
     getSelectionPrompt() {

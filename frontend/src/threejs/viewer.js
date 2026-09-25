@@ -3,6 +3,22 @@
 // SPDX-License-Identifier: AGPL-3.0-or-later
 
 import * as THREE from 'three';
+
+if (typeof window !== 'undefined') {
+  window.__THREE__ = THREE;
+}
+
+// Eliminate coplanar Z-fighting / stippling noise in section cuts.
+// When a section clipping plane cuts coplanar with geometry faces (e.g. pocket floors, step faces),
+// perspective interpolation jitter in IEEE 754 float32 causes fragments to oscillate around 0,
+// creating static salt-and-pepper noise and breaking manifold parity in stencil capping.
+// Introducing an epsilon tolerance (clipBias) ensures all coplanar fragments evaluate cleanly.
+if (THREE.ShaderChunk && THREE.ShaderChunk.clipping_planes_fragment) {
+  THREE.ShaderChunk.clipping_planes_fragment = THREE.ShaderChunk.clipping_planes_fragment.replace(
+    /if\s*\(\s*dot\(\s*-\s*vViewPosition\s*,\s*plane\.xyz\s*\)\s*>\s*plane\.w\s*\)\s*discard\s*;/g,
+    'float clipDist = dot(-vViewPosition, plane.xyz) - plane.w;\n\t\tif (clipDist > max(1e-4, abs(plane.w) * 1e-5)) discard;'
+  );
+}
 import { OBJLoader } from 'three/addons/loaders/OBJLoader.js';
 import { OrbitControls } from 'three/addons/controls/OrbitControls.js';
 import { TransformControls } from 'three/addons/controls/TransformControls.js';
@@ -179,6 +195,8 @@ export class Viewer {
     this.isShiftDown = false;
     this.isAltDown = false;
     this.onNavigationStyleChangedCallback = null;
+    this.onNavigationChange = null;
+    this.onModifierChange = null;
 
     this.initViewer();
   }
@@ -332,6 +350,9 @@ export class Viewer {
 
     this.controls.addEventListener('start', () => {
       this._isNavigating = true;
+      if (typeof this.onNavigationChange === 'function') {
+        this.onNavigationChange(true);
+      }
     });
     this.controls.addEventListener('change', () => {
       this._hasCameraMoved = true;
@@ -340,6 +361,9 @@ export class Viewer {
       setTimeout(() => {
         this._isNavigating = false;
         this._hasCameraMoved = false;
+        if (typeof this.onNavigationChange === 'function') {
+          this.onNavigationChange(false);
+        }
       }, 50);
     });
 
@@ -355,6 +379,9 @@ export class Viewer {
       this.isAltDown = false;
       this.isPointerOver = false;
       this.lastPointerPos = null;
+      if (typeof this.onModifierChange === 'function') {
+        this.onModifierChange(false);
+      }
       this.updateCursor();
     };
     window.addEventListener('keydown', this.onKeyDownHandler);
@@ -518,10 +545,16 @@ export class Viewer {
       this.isShiftDown = true;
       this.lastPointerPos = null;
       this.updateCursor();
+      if (typeof this.onModifierChange === 'function') {
+        this.onModifierChange(true);
+      }
     } else if (event.key === 'Alt') {
       this.isAltDown = true;
       this.lastPointerPos = null;
       this.updateCursor();
+      if (typeof this.onModifierChange === 'function') {
+        this.onModifierChange(true);
+      }
       event.preventDefault(); // Stop browser / window manager Alt menu
     }
   }
@@ -531,10 +564,16 @@ export class Viewer {
       this.isShiftDown = false;
       this.lastPointerPos = null;
       this.updateCursor();
+      if (typeof this.onModifierChange === 'function') {
+        this.onModifierChange(this.isShiftDown || this.isAltDown);
+      }
     } else if (event.key === 'Alt') {
       this.isAltDown = false;
       this.lastPointerPos = null;
       this.updateCursor();
+      if (typeof this.onModifierChange === 'function') {
+        this.onModifierChange(this.isShiftDown || this.isAltDown);
+      }
     }
     this.clearNavigationTimeout();
   }
@@ -544,7 +583,10 @@ export class Viewer {
     this._navTimeout = setTimeout(() => {
       this._isNavigating = false;
       this._hasCameraMoved = false;
-    }, 60);
+      if (typeof this.onNavigationChange === 'function') {
+        this.onNavigationChange(false);
+      }
+    }, 100);
   }
 
   panCamera(dx, dy) {
@@ -717,10 +759,16 @@ export class Viewer {
     // Auto-correct modifier keys if user released them outside the window or after Alt+Tab
     if (!event.shiftKey && this.isShiftDown) {
       this.isShiftDown = false;
+      if (typeof this.onModifierChange === 'function') {
+        this.onModifierChange(this.isShiftDown || this.isAltDown);
+      }
       this.updateCursor();
     }
     if (!event.altKey && this.isAltDown) {
       this.isAltDown = false;
+      if (typeof this.onModifierChange === 'function') {
+        this.onModifierChange(this.isShiftDown || this.isAltDown);
+      }
       this.updateCursor();
     }
 
@@ -732,14 +780,24 @@ export class Viewer {
       if (isShift && !isAlt) {
         // Shift + Pointer Movement => PAN (Desplazar)
         this.panCamera(dx, dy);
-        this._isNavigating = true;
+        if (!this._isNavigating) {
+          this._isNavigating = true;
+          if (typeof this.onNavigationChange === 'function') {
+            this.onNavigationChange(true);
+          }
+        }
         this._hasCameraMoved = true;
         this.clearNavigationTimeout();
         return;
       } else if (isAlt) {
         // Alt + Pointer Movement => ROTATE (Girar / Orbitar)
         this.rotateCamera(dx, dy);
-        this._isNavigating = true;
+        if (!this._isNavigating) {
+          this._isNavigating = true;
+          if (typeof this.onNavigationChange === 'function') {
+            this.onNavigationChange(true);
+          }
+        }
         this._hasCameraMoved = true;
         this.clearNavigationTimeout();
         return;
@@ -1628,8 +1686,8 @@ export class Viewer {
         depthWrite: true,
         depthTest: true,
         polygonOffset: true,
-        polygonOffsetFactor: -0.5,
-        polygonOffsetUnits: -0.5
+        polygonOffsetFactor: -1.5,
+        polygonOffsetUnits: -3.0
       });
 
       this.sectionCapMaterials.push(capMat);
