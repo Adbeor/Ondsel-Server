@@ -317,13 +317,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 {{ sectionAxis.toUpperCase() }}: {{ (sectionOffset || 0).toFixed(1) }} mm
               </v-chip>
             </div>
-            <div class="d-flex align-center flex-shrink-0" @pointerdown.stop>
+            <div class="panel-header-actions flex-shrink-0" @pointerdown.stop>
               <v-btn
                 icon
                 variant="text"
-                size="x-small"
-                density="compact"
-                class="mr-0.5"
+                class="panel-action-btn"
                 :color="minimalistMode ? 'primary' : undefined"
                 @click.stop="toggleMinimalistMode"
               >
@@ -335,9 +333,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               <v-btn
                 icon
                 variant="text"
-                size="x-small"
-                density="compact"
-                class="mr-0.5"
+                class="panel-action-btn"
                 @click.stop="togglePanelCollapse('section')"
               >
                 <v-icon size="16">{{ sectionPanelCollapsed ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
@@ -345,13 +341,12 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                   {{ sectionPanelCollapsed ? 'Expandir panel de corte' : 'Minimizar panel de corte' }}
                 </v-tooltip>
               </v-btn>
+              <div class="panel-header-divider"></div>
               <v-btn
                 icon
                 variant="text"
-                size="x-small"
-                density="compact"
+                class="panel-action-btn"
                 color="error"
-                class="mr-0.5"
                 @click="deactivateSection"
               >
                 <v-icon size="16">mdi-power</v-icon>
@@ -360,8 +355,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               <v-btn
                 icon
                 variant="text"
-                size="x-small"
-                density="compact"
+                class="panel-action-btn"
                 @click="closePanel"
               >
                 <v-icon size="16">mdi-close</v-icon>
@@ -625,13 +619,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 {{ currentMeasurement.primaryValue }}
               </v-chip>
             </div>
-            <div class="d-flex align-center flex-shrink-0" @pointerdown.stop>
+            <div class="panel-header-actions flex-shrink-0" @pointerdown.stop>
               <v-btn
                 icon
                 variant="text"
-                size="x-small"
-                density="compact"
-                class="mr-0.5"
+                class="panel-action-btn"
                 :color="minimalistMode ? 'primary' : undefined"
                 @click.stop="toggleMinimalistMode"
               >
@@ -643,9 +635,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               <v-btn
                 icon
                 variant="text"
-                size="x-small"
-                density="compact"
-                class="mr-0.5"
+                class="panel-action-btn"
                 @click.stop="togglePanelCollapse('measure')"
               >
                 <v-icon size="16">{{ measurePanelCollapsed ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
@@ -656,9 +646,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               <v-btn
                 icon
                 variant="text"
-                size="x-small"
-                density="compact"
-                class="mr-0.5"
+                class="panel-action-btn"
                 :color="measureXray ? 'warning' : undefined"
                 @click="toggleMeasureXray"
               >
@@ -671,9 +659,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 v-if="currentMeasurement && !minimalistMode"
                 icon
                 variant="text"
-                size="x-small"
-                density="compact"
-                class="mr-0.5"
+                class="panel-action-btn"
                 :color="copiedTarget === 'all' ? 'success' : undefined"
                 @click="copyAllMeasurement"
               >
@@ -682,13 +668,12 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                   {{ copiedTarget === 'all' ? '¡Informe copiado!' : 'Copiar informe completo' }}
                 </v-tooltip>
               </v-btn>
+              <div class="panel-header-divider"></div>
               <v-btn
                 icon
                 variant="text"
-                size="x-small"
-                density="compact"
+                class="panel-action-btn"
                 color="error"
-                class="mr-0.5"
                 @click="deactivateMeasurement"
               >
                 <v-icon size="16">mdi-power</v-icon>
@@ -697,8 +682,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               <v-btn
                 icon
                 variant="text"
-                size="x-small"
-                density="compact"
+                class="panel-action-btn"
                 @click="measurePanelOpen = false"
               >
                 <v-icon size="16">mdi-close</v-icon>
@@ -2434,5 +2418,35 @@ export default {
 }
 .drag-title-area {
   cursor: grab;
+}
+.panel-header-actions {
+  display: flex;
+  align-items: center;
+  gap: 5px;
+}
+.panel-action-btn {
+  width: 26px !important;
+  height: 26px !important;
+  min-width: 26px !important;
+  min-height: 26px !important;
+  padding: 0 !important;
+  border-radius: 6px !important;
+  display: inline-flex !important;
+  align-items: center !important;
+  justify-content: center !important;
+  transition: background-color 0.15s ease, color 0.15s ease, transform 0.1s ease !important;
+}
+.panel-action-btn:hover {
+  background-color: rgba(var(--v-theme-on-surface), 0.1) !important;
+}
+.panel-action-btn:active {
+  transform: scale(0.92);
+}
+.panel-header-divider {
+  width: 1px;
+  height: 14px;
+  background-color: rgba(var(--v-theme-on-surface), 0.22);
+  margin: 0 4px;
+  flex-shrink: 0;
 }
 </style>
