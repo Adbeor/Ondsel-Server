@@ -138,12 +138,39 @@ export function getMeshTopology(mesh) {
     }
   }
 
+  // Precompute which triangles belong to multi-triangle flat planar faces (size > 2)
+  const planarTrianglesSet = new Set();
+  const visitedPlanar = new Set();
+  for (let i = 0; i < triCount; i++) {
+    if (visitedPlanar.has(i)) continue;
+    const comp = [i];
+    const q = [i];
+    visitedPlanar.add(i);
+    const n0 = triangles[i].normal;
+    while (q.length > 0) {
+      const cur = q.shift();
+      for (const ek of triangles[cur].edges) {
+        for (const ni of (edgeToTriangles.get(ek) || [])) {
+          if (!visitedPlanar.has(ni) && triangles[ni].normal.dot(n0) > 0.9998) {
+            visitedPlanar.add(ni);
+            comp.push(ni);
+            q.push(ni);
+          }
+        }
+      }
+    }
+    if (comp.length > 2) {
+      for (const idx of comp) planarTrianglesSet.add(idx);
+    }
+  }
+
   const topology = {
     triangles,
     edgeToTriangles,
     vKeyToPos,
     creaseAdjacency,
     creaseEdgeSet,
+    planarTrianglesSet,
     pos,
     quant,
     maxDim
@@ -461,11 +488,14 @@ export function fitCircle2D(points) {
   const uc = meanU + xc;
   const vc = meanV + yc;
 
-  // Compute standard deviation of residuals
+  // Compute standard deviation of residuals and maximum residual
   let sumResSq = 0;
+  let maxResidual = 0;
   for (let i = 0; i < n; i++) {
     const d = Math.hypot(points[i].u - uc, points[i].v - vc);
-    sumResSq += (d - r) * (d - r);
+    const diff = Math.abs(d - r);
+    if (diff > maxResidual) maxResidual = diff;
+    sumResSq += diff * diff;
   }
   const sigma = Math.sqrt(sumResSq / n);
 
@@ -474,6 +504,7 @@ export function fitCircle2D(points) {
     vc,
     r,
     sigma,
+    maxResidual,
     relError: sigma / r
   };
 }
@@ -603,14 +634,15 @@ export function getAdaptiveRingHalfWidth(radius, isHover = false) {
  * Creates a smooth 3D ribbon ring (annular band) along a circle with adaptive physical width.
  * Clean, discrete circular rims that never vanish into coplanar surfaces.
  */
-export function createThickRingMesh(centerPt, U, V, radius, halfWidth = null, colorHex = 0x00b4d8, isHover = false, renderOrder = 3018, depthTest = true) {
+export function createThickRingMesh(centerPt, U, V, radius, halfWidth = null, colorHex = 0x00b4d8, isHover = false, renderOrder = 3018, depthTest = true, startAngle = 0, endAngle = Math.PI * 2) {
   if (halfWidth === null || halfWidth === undefined) {
     halfWidth = getAdaptiveRingHalfWidth(radius, isHover);
   }
   // Ensure ring never covers more than 25% of radius (prevents inner hole collapse)
   halfWidth = Math.min(halfWidth, radius * 0.25);
 
-  const segments = 64;
+  const angleSpan = endAngle - startAngle;
+  const segments = Math.max(16, Math.round(64 * (Math.abs(angleSpan) / (Math.PI * 2))));
   const positions = new Float32Array((segments + 1) * 2 * 3);
   const indices = [];
 
@@ -619,7 +651,7 @@ export function createThickRingMesh(centerPt, U, V, radius, halfWidth = null, co
 
   let vOffset = 0;
   for (let i = 0; i <= segments; i++) {
-    const theta = (i / segments) * Math.PI * 2;
+    const theta = startAngle + (i / segments) * angleSpan;
     const cos = Math.cos(theta);
     const sin = Math.sin(theta);
 
@@ -1080,48 +1112,51 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
   const topology = getMeshTopology(mesh);
   if (!topology) return null;
 
-  const { triangles, edgeToTriangles, vKeyToPos, creaseAdjacency, creaseEdgeSet, pos } = topology;
+  const { triangles, edgeToTriangles, vKeyToPos, creaseAdjacency, creaseEdgeSet, planarTrianglesSet, pos } = topology;
   if (seedTriangleIndex < 0 || seedTriangleIndex >= triangles.length) return null;
 
   const seedTri = triangles[seedTriangleIndex];
   const normalMatrix = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
+  const tempV = new THREE.Vector3();
 
-  // 1. PRIMARY: Check if hit triangle touches a circular crease / arista (e.g. hole rim or cylinder shoulder)
+  // Helper: check if a crease edge is the intersection between two multi-triangle planar faces.
+  // In 3D geometry, the intersection of two planar faces is ALWAYS a straight line, NEVER a circle!
+  const isPlanarIntersectionEdge = (ek) => {
+    if (!planarTrianglesSet) return false;
+    const tris = edgeToTriangles.get(ek);
+    if (!tris || tris.length !== 2) return false;
+    return planarTrianglesSet.has(tris[0]) && planarTrianglesSet.has(tris[1]);
+  };
+
+  // 1. PRIMARY: Check candidate crease edges (hole rims, cylinder shoulders, circular arcs)
   const candidateCreaseEdges = [];
   const addedCandidateEdges = new Set();
   const addCandidate = (ek) => {
     if (creaseEdgeSet && creaseEdgeSet.has(ek) && !addedCandidateEdges.has(ek)) {
-      addedCandidateEdges.add(ek);
-      candidateCreaseEdges.push(ek);
+      if (!isPlanarIntersectionEdge(ek)) {
+        addedCandidateEdges.add(ek);
+        candidateCreaseEdges.push(ek);
+      }
     }
   };
 
-  for (const ek of seedTri.edges) {
-    addCandidate(ek);
-  }
-
-  // Also check 1-ring neighbor edges if seedTri is adjacent to a crease rim
-  if (candidateCreaseEdges.length === 0 && creaseEdgeSet) {
+  for (const ek of seedTri.edges) addCandidate(ek);
+  if (candidateCreaseEdges.length === 0) {
     for (const ek of seedTri.edges) {
-      const nbrs = edgeToTriangles.get(ek) || [];
-      for (const ni of nbrs) {
+      for (const ni of (edgeToTriangles.get(ek) || [])) {
         if (ni === seedTriangleIndex) continue;
-        for (const ek2 of triangles[ni].edges) {
-          addCandidate(ek2);
-        }
+        for (const ek2 of triangles[ni].edges) addCandidate(ek2);
       }
     }
   }
 
-  // Sort candidate edges by proximity to hitPoint so the arista closest to the cursor is evaluated first
-  if (candidateCreaseEdges.length > 1) {
+  // Sort candidates by proximity to hitPoint
+  if (candidateCreaseEdges.length > 1 && hitPoint) {
     candidateCreaseEdges.sort((ekA, ekB) => {
       const [a1, a2] = ekA.split('#');
       const [b1, b2] = ekB.split('#');
-      const posA1 = vKeyToPos.get(a1);
-      const posA2 = vKeyToPos.get(a2);
-      const posB1 = vKeyToPos.get(b1);
-      const posB2 = vKeyToPos.get(b2);
+      const posA1 = vKeyToPos.get(a1), posA2 = vKeyToPos.get(a2);
+      const posB1 = vKeyToPos.get(b1), posB2 = vKeyToPos.get(b2);
       if (!posA1 || !posA2 || !posB1 || !posB2) return 0;
       const midA = new THREE.Vector3().addVectors(posA1, posA2).multiplyScalar(0.5).applyMatrix4(mesh.matrixWorld);
       const midB = new THREE.Vector3().addVectors(posB1, posB2).multiplyScalar(0.5).applyMatrix4(mesh.matrixWorld);
@@ -1135,91 +1170,92 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
     const visited = new Set([startKa, startKb]);
     let isClosed = false;
 
-    // Walk forward from startKb
-    let cur = startKb;
-    let prev = startKa;
+    const isChainCircular = (keyList) => {
+      if (keyList.length < 4) return true;
+      const pts = keyList.map(k => vKeyToPos.get(k));
+      let sx = 0, sy = 0, sz = 0;
+      pts.forEach(p => { sx += p.x; sy += p.y; sz += p.z; });
+      const m = new THREE.Vector3(sx / pts.length, sy / pts.length, sz / pts.length);
+      let n = new THREE.Vector3();
+      for (let i = 0; i < pts.length; i++) {
+        n.add(new THREE.Vector3().crossVectors(pts[i].clone().sub(m), pts[(i + 1) % pts.length].clone().sub(m)));
+      }
+      if (n.lengthSq() < 1e-8) return false;
+      n.normalize();
+      const { U, V } = getOrthonormalBasis(n);
+      const fit = fitCircle2D(pts.map(p => ({ u: p.clone().sub(m).dot(U), v: p.clone().sub(m).dot(V) })));
+      return fit && fit.r > 0.5 && fit.relError <= 0.035 && fit.maxResidual <= Math.max(0.4, fit.r * 0.02);
+    };
+
+    // Walk forward
+    let cur = startKb, prev = startKa;
     while (true) {
       const nbrs = creaseAdjacency.get(cur) || [];
       let next = null;
-
       if (nbrs.length === 1) {
-        if (nbrs[0].nbrKey !== prev && !visited.has(nbrs[0].nbrKey)) {
+        if (nbrs[0].nbrKey !== prev && !visited.has(nbrs[0].nbrKey) && !isPlanarIntersectionEdge(nbrs[0].edgeKey)) {
           next = nbrs[0].nbrKey;
         }
       } else {
-        // At junctions, prioritize the neighbor continuing the smooth tangent direction
         let bestScore = -Infinity;
-        const pCur = vKeyToPos.get(cur);
-        const pPrev = vKeyToPos.get(prev);
+        const pCur = vKeyToPos.get(cur), pPrev = vKeyToPos.get(prev);
         const dirIn = (pCur && pPrev) ? new THREE.Vector3().subVectors(pCur, pPrev).normalize() : null;
-
         for (const item of nbrs) {
           if (item.nbrKey === prev) continue;
-          if (item.nbrKey === startKa) {
-            isClosed = true;
-            next = startKa;
-            break;
-          }
+          if (isPlanarIntersectionEdge(item.edgeKey)) continue;
+          if (item.nbrKey === startKa) { isClosed = true; next = startKa; break; }
           if (visited.has(item.nbrKey)) continue;
           if (dirIn && vKeyToPos.has(item.nbrKey)) {
             const dirOut = new THREE.Vector3().subVectors(vKeyToPos.get(item.nbrKey), pCur).normalize();
             const score = dirIn.dot(dirOut);
-            if (score > bestScore) {
+            if (score > 0.60 && score > bestScore) {
               bestScore = score;
               next = item.nbrKey;
             }
-          } else if (next === null) {
-            next = item.nbrKey;
           }
         }
       }
-
-      if (next === null || next === startKa) {
-        if (next === startKa) isClosed = true;
-        break;
-      }
+      if (next === null || next === startKa) { if (next === startKa) isClosed = true; break; }
       if (visited.has(next)) break;
+      if (!isChainCircular([...chain, next])) break;
+
       visited.add(next);
       chain.push(next);
       prev = cur;
       cur = next;
     }
 
-    // Walk backward from startKa if not closed
+    // Walk backward if not closed
     if (!isClosed) {
-      cur = startKa;
-      prev = startKb;
+      cur = startKa; prev = startKb;
       while (true) {
         const nbrs = creaseAdjacency.get(cur) || [];
         let next = null;
-
         if (nbrs.length === 1) {
-          if (nbrs[0].nbrKey !== prev && !visited.has(nbrs[0].nbrKey)) {
+          if (nbrs[0].nbrKey !== prev && !visited.has(nbrs[0].nbrKey) && !isPlanarIntersectionEdge(nbrs[0].edgeKey)) {
             next = nbrs[0].nbrKey;
           }
         } else {
           let bestScore = -Infinity;
-          const pCur = vKeyToPos.get(cur);
-          const pPrev = vKeyToPos.get(prev);
+          const pCur = vKeyToPos.get(cur), pPrev = vKeyToPos.get(prev);
           const dirIn = (pCur && pPrev) ? new THREE.Vector3().subVectors(pCur, pPrev).normalize() : null;
-
           for (const item of nbrs) {
             if (item.nbrKey === prev) continue;
+            if (isPlanarIntersectionEdge(item.edgeKey)) continue;
             if (visited.has(item.nbrKey)) continue;
             if (dirIn && vKeyToPos.has(item.nbrKey)) {
               const dirOut = new THREE.Vector3().subVectors(vKeyToPos.get(item.nbrKey), pCur).normalize();
               const score = dirIn.dot(dirOut);
-              if (score > bestScore) {
+              if (score > 0.60 && score > bestScore) {
                 bestScore = score;
                 next = item.nbrKey;
               }
-            } else if (next === null) {
-              next = item.nbrKey;
             }
           }
         }
-
         if (next === null || visited.has(next)) break;
+        if (!isChainCircular([next, ...chain])) break;
+
         visited.add(next);
         chain.unshift(next);
         prev = cur;
@@ -1227,290 +1263,237 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
       }
     }
 
-    // STRICT VALIDATION 1: A circular hole or cylinder rim MUST have at least 8 vertices if closed, or 6 if an arc.
-    // Rectangles (4 vertices) and triangles (3 vertices) are NEVER circles!
-    if (isClosed && chain.length < 8) continue;
-    if (!isClosed && chain.length < 6) continue;
+    if (isClosed && chain.length < 6) continue;
+    if (!isClosed && chain.length < 4) continue;
 
     const ptsWorld = chain.map(k => vKeyToPos.get(k).clone().applyMatrix4(mesh.matrixWorld));
     const nPts = ptsWorld.length;
 
-    // STRICT VALIDATION 2: Check turn angles along the chain.
-    // In a CAD circular edge, adjacent segments have small turn angles (e.g. 15-22.5 deg; at coarse 8-gon = 45 deg).
-    // A rectangle has sharp 90 deg corners! A triangle has 120 deg.
-    let hasSharpCorner = false;
-    for (let i = 0; i < (isClosed ? nPts : nPts - 2); i++) {
-      const idxPrev = isClosed ? (i - 1 + nPts) % nPts : i;
-      const idxCur = isClosed ? i : i + 1;
-      const idxNext = isClosed ? (i + 1) % nPts : i + 2;
-
-      const pPrev = ptsWorld[idxPrev];
-      const pCur = ptsWorld[idxCur];
-      const pNext = ptsWorld[idxNext];
-
-      const d1 = new THREE.Vector3().subVectors(pCur, pPrev);
-      const d2 = new THREE.Vector3().subVectors(pNext, pCur);
-      const l1 = d1.length();
-      const l2 = d2.length();
-      if (l1 < 1e-6 || l2 < 1e-6) continue;
-
-      const dot = Math.max(-1, Math.min(1, d1.dot(d2) / (l1 * l2)));
-      const turnDeg = Math.acos(dot) * (180 / Math.PI);
-      if (turnDeg > 52.0) {
-        hasSharpCorner = true;
-        break;
-      }
-    }
-    if (hasSharpCorner) continue;
-
-    // STRICT VALIDATION 3: Chord length uniformity along the circular rim.
-    // In a rectangle, width vs height chord lengths differ drastically (e.g. 400mm vs 50mm).
-    let minChord = Infinity, maxChord = 0;
-    for (let i = 0; i < (isClosed ? nPts : nPts - 1); i++) {
-      const ch = ptsWorld[i].distanceTo(ptsWorld[(i + 1) % nPts]);
-      if (ch < minChord) minChord = ch;
-      if (ch > maxChord) maxChord = ch;
-    }
-    if (maxChord > 0 && (minChord / maxChord) < 0.25) {
-      continue;
-    }
-
-    let sumX = 0, sumY = 0, sumZ = 0;
-    ptsWorld.forEach(p => { sumX += p.x; sumY += p.y; sumZ += p.z; });
-    const mean = new THREE.Vector3(sumX / nPts, sumY / nPts, sumZ / nPts);
+    let sx = 0, sy = 0, sz = 0;
+    ptsWorld.forEach(p => { sx += p.x; sy += p.y; sz += p.z; });
+    const mean = new THREE.Vector3(sx / nPts, sy / nPts, sz / nPts);
 
     let fittedNorm = new THREE.Vector3();
     for (let i = 0; i < nPts; i++) {
-      const p1 = ptsWorld[i];
-      const p2 = ptsWorld[(i + 1) % nPts];
-      const v1 = new THREE.Vector3().subVectors(p1, mean);
-      const v2 = new THREE.Vector3().subVectors(p2, mean);
-      const cross = new THREE.Vector3().crossVectors(v1, v2);
-      fittedNorm.add(cross);
+      fittedNorm.add(new THREE.Vector3().crossVectors(ptsWorld[i].clone().sub(mean), ptsWorld[(i + 1) % nPts].clone().sub(mean)));
+    }
+    if (fittedNorm.lengthSq() < 1e-8) continue;
+    fittedNorm.normalize();
+    canonicalizeAxis(fittedNorm);
+
+    const { U, V } = getOrthonormalBasis(fittedNorm);
+    const pts2D = ptsWorld.map(p => ({ u: p.clone().sub(mean).dot(U), v: p.clone().sub(mean).dot(V) }));
+    const fit = fitCircle2D(pts2D);
+    if (!fit || fit.r < 0.5 || fit.relError > 0.035 || fit.maxResidual > Math.max(0.4, fit.r * 0.02)) continue;
+
+    const quant2D = Math.max(1e-4, fit.r * 1e-3);
+    const unique2DMap = new Map();
+    for (const pt of pts2D) {
+      const k = `${Math.round(pt.u / quant2D)}_${Math.round(pt.v / quant2D)}`;
+      if (!unique2DMap.has(k)) unique2DMap.set(k, { u: pt.u, v: pt.v });
+    }
+    const uniqueCrossPts = Array.from(unique2DMap.values());
+    if (uniqueCrossPts.length < 4) continue;
+
+    const polarAngles = uniqueCrossPts.map(p => Math.atan2(p.v - fit.vc, p.u - fit.uc)).sort((a, b) => a - b);
+    const mAngles = polarAngles.length;
+    const gaps = [];
+    for (let i = 0; i < mAngles - 1; i++) {
+      gaps.push({ gap: polarAngles[i + 1] - polarAngles[i], index: i });
+    }
+    gaps.push({ gap: polarAngles[0] + 2 * Math.PI - polarAngles[mAngles - 1], index: mAngles - 1 });
+    gaps.sort((a, b) => b.gap - a.gap);
+
+    const largestGap = gaps[0].gap;
+    const maxOtherGapDeg = (gaps.length > 1 ? gaps[1].gap : 0) * (180 / Math.PI);
+    const largestGapDeg = largestGap * (180 / Math.PI);
+
+    let arcSpanDeg = 360.0;
+    let isArc = false;
+    let startAngle = 0;
+    let endAngle = Math.PI * 2;
+
+    if (largestGapDeg > 52.0) {
+      isArc = true;
+      arcSpanDeg = 360.0 - largestGapDeg;
+      if (arcSpanDeg < 25.0 || maxOtherGapDeg > 45.0) continue;
+      const k = gaps[0].index;
+      startAngle = polarAngles[(k + 1) % mAngles];
+      endAngle = polarAngles[k];
+      if (endAngle < startAngle) endAngle += 2 * Math.PI;
     }
 
-    if (fittedNorm.lengthSq() > 1e-8) {
-      fittedNorm.normalize();
-      canonicalizeAxis(fittedNorm);
+    const rimCenterWorld = mean.clone().addScaledVector(U, fit.uc).addScaledVector(V, fit.vc);
+    const radius = fit.r;
+    const diameter = radius * 2;
+    const centerAxis = rimCenterWorld.clone().sub(fittedNorm.clone().multiplyScalar(rimCenterWorld.dot(fittedNorm)));
 
-      const { U, V } = getOrthonormalBasis(fittedNorm);
-      const pts2D = ptsWorld.map(p => {
-        const d = new THREE.Vector3().subVectors(p, mean);
-        return { u: d.dot(U), v: d.dot(V) };
-      });
+    // Flood attached cylinder wall along the rim
+    const cylSeeds = [];
+    const radTol = Math.max(0.6, radius * 0.08);
 
-      const fit = fitCircle2D(pts2D);
-      if (fit && fit.r > 0.1 && fit.relError < 0.035) {
-        // STRICT VALIDATION 4: Angular distribution around center.
-        // For a closed circle, there must NOT be a large angular gap (> 52 deg) between consecutive vertices.
-        // A rectangle has gaps of 90 deg or 140 deg!
-        const polarAngles = pts2D.map(p => Math.atan2(p.v - fit.vc, p.u - fit.uc)).sort((a, b) => a - b);
-        let maxGap = 0;
-        for (let i = 0; i < polarAngles.length; i++) {
-          const gap = (i === polarAngles.length - 1)
-            ? (polarAngles[0] + 2 * Math.PI - polarAngles[i])
-            : (polarAngles[i + 1] - polarAngles[i]);
-          if (gap > maxGap) maxGap = gap;
-        }
-        const maxGapDeg = maxGap * (180 / Math.PI);
-        if (isClosed && maxGapDeg > 52.0) {
-          continue;
-        }
-        if (!isClosed) {
-          let maxInnerGap = 0;
-          for (let i = 0; i < polarAngles.length - 1; i++) {
-            const g = polarAngles[i + 1] - polarAngles[i];
-            if (g > maxInnerGap) maxInnerGap = g;
-          }
-          if (maxInnerGap * (180 / Math.PI) > 35.0) continue;
-        }
-
-        const rimCenterWorld = mean.clone().addScaledVector(U, fit.uc).addScaledVector(V, fit.vc);
-        const radius = fit.r;
-        const diameter = radius * 2;
-
-        // Check if there is an attached cylinder wall along the rim
-        const cylSeeds = [];
-        for (let i = 0; i < nPts; i++) {
-          const ka = chain[i];
-          const kb = chain[(i + 1) % nPts];
-          const ek = ka < kb ? `${ka}#${kb}` : `${kb}#${ka}`;
-          const tris = edgeToTriangles.get(ek) || [];
-          for (const ti of tris) {
-            const tri = triangles[ti];
-            const triNormWorld = tri.normal.clone().applyMatrix3(normalMatrix).normalize();
-            if (Math.abs(triNormWorld.dot(fittedNorm)) < 0.35) {
-              cylSeeds.push(ti);
-            }
-          }
-        }
-
-        let depth = 0;
-        let centerWorld = rimCenterWorld.clone();
-        let topCenterWorld = rimCenterWorld.clone();
-        let bottomCenterWorld = rimCenterWorld.clone();
-        let nearestRimCenterWorld = rimCenterWorld.clone();
-        let otherRimCenterWorld = null;
-        let cylGeom = null;
-        let isHole = true;
-        let visitedCyl = new Set();
-        let cylTriangles = [];
-
-        if (cylSeeds.length > 0) {
-          const cylQueue = [...cylSeeds];
-          cylSeeds.forEach(ti => visitedCyl.add(ti));
-          cylTriangles = cylSeeds.map(ti => triangles[ti]);
-
-          while (cylQueue.length > 0 && cylTriangles.length < 20000) {
-            const curIdx = cylQueue.shift();
-            const curTri = triangles[curIdx];
-
-            for (const ek of curTri.edges) {
-              const nbrs = edgeToTriangles.get(ek) || [];
-              for (const ni of nbrs) {
-                if (visitedCyl.has(ni)) continue;
-                const nbr = triangles[ni];
-                const nbrNormWorld = nbr.normal.clone().applyMatrix3(normalMatrix).normalize();
-                if (Math.abs(nbrNormWorld.dot(fittedNorm)) > 0.35) continue;
-
-                visitedCyl.add(ni);
-                cylTriangles.push(nbr);
-                cylQueue.push(ni);
-              }
-            }
-          }
-
-          // STRICT VALIDATION 5: Validate that the attached wall is actually cylindrical (not flat rectangular sides)
-          const centerAxis = rimCenterWorld.clone().sub(fittedNorm.clone().multiplyScalar(rimCenterWorld.dot(fittedNorm)));
-          let badCentroids = 0;
-          let badNormals = 0;
-          const tempV = new THREE.Vector3();
-
-          for (const tri of cylTriangles) {
-            const triCentroid = new THREE.Vector3();
-            for (let k = 0; k < 3; k++) {
-              tempV.fromBufferAttribute(pos, tri.indices[k]).applyMatrix4(mesh.matrixWorld);
-              triCentroid.add(tempV);
-            }
-            triCentroid.multiplyScalar(1 / 3);
-
-            const projOnAxis = centerAxis.clone().addScaledVector(fittedNorm, triCentroid.dot(fittedNorm));
-            const distToAxis = triCentroid.distanceTo(projOnAxis);
-            if (Math.abs(distToAxis - radius) / radius > 0.12) {
-              badCentroids++;
-            }
-
-            const radDir = new THREE.Vector3().subVectors(triCentroid, projOnAxis).normalize();
-            const triNormWorld = tri.normal.clone().applyMatrix3(normalMatrix).normalize();
-            if (Math.abs(triNormWorld.dot(radDir)) < 0.80) {
-              badNormals++;
-            }
-          }
-
-          const isWallCylindrical = (badCentroids <= cylTriangles.length * 0.15) && (badNormals <= cylTriangles.length * 0.20);
-
-          if (isWallCylindrical) {
-            let hMin = Infinity, hMax = -Infinity;
-            const cylPositions = new Float32Array(cylTriangles.length * 9);
-            let cOffset = 0;
-
-            for (const tri of cylTriangles) {
-              for (let k = 0; k < 3; k++) {
-                tempV.fromBufferAttribute(pos, tri.indices[k]).applyMatrix4(mesh.matrixWorld);
-                cylPositions[cOffset++] = tempV.x;
-                cylPositions[cOffset++] = tempV.y;
-                cylPositions[cOffset++] = tempV.z;
-                const h = tempV.dot(fittedNorm);
-                if (h < hMin) hMin = h;
-                if (h > hMax) hMax = h;
-              }
-            }
-
-            depth = Math.max(0, hMax - hMin);
-            const midH = (hMin + hMax) * 0.5;
-            centerWorld = centerAxis.clone().addScaledVector(fittedNorm, midH);
-
-            topCenterWorld = centerAxis.clone().addScaledVector(fittedNorm, hMax);
-            bottomCenterWorld = centerAxis.clone().addScaledVector(fittedNorm, hMin);
-
-            const hitH = hitPoint.dot(fittedNorm);
-            const nearRimH = Math.abs(hitH - hMin) < Math.abs(hitH - hMax) ? hMin : hMax;
-            const farRimH = nearRimH === hMin ? hMax : hMin;
-            nearestRimCenterWorld = centerAxis.clone().addScaledVector(fittedNorm, nearRimH);
-            otherRimCenterWorld = centerAxis.clone().addScaledVector(fittedNorm, farRimH);
-
-            cylGeom = new THREE.BufferGeometry();
-            cylGeom.setAttribute('position', new THREE.BufferAttribute(cylPositions, 3));
-            cylGeom.computeVertexNormals();
-
-            const sampleV = new THREE.Vector3().fromBufferAttribute(pos, cylTriangles[0].indices[0]).applyMatrix4(mesh.matrixWorld);
-            const sampleProj = centerAxis.clone().addScaledVector(fittedNorm, sampleV.dot(fittedNorm));
-            const radDir = new THREE.Vector3().subVectors(sampleV, sampleProj).normalize();
-            const triNormWorld = cylTriangles[0].normal.clone().applyMatrix3(normalMatrix).normalize();
-            isHole = radDir.dot(triNormWorld) < 0;
-          } else {
-            // Wall failed validation -> flat plate or rectangular profile, reset depth
-            cylTriangles = [];
-            visitedCyl = new Set();
-            depth = 0;
-          }
-        }
-
-        return {
-          type: depth > 0.05 ? 'cylinder' : 'circle',
-          isHole,
-          label: depth > 0.05 ? (isHole ? 'Orificio Cilíndrico' : 'Cilindro / Eje') : 'Arista Circular',
-          mesh,
-          radius,
-          diameter,
-          depth,
-          center: centerWorld,
-          rimCenter: nearestRimCenterWorld,
-          otherRimCenter: otherRimCenterWorld,
-          topCenter: topCenterWorld,
-          bottomCenter: bottomCenterWorld,
-          axis: fittedNorm,
-          U,
-          V,
-          cylinderGeometry: cylGeom,
-          boundaryGeometry: null,
-          triangleIndicesSet: visitedCyl.size > 0 ? visitedCyl : new Set([seedTriangleIndex]),
-          trianglesCount: cylTriangles.length > 0 ? cylTriangles.length : chain.length,
-          hitPoint: hitPoint.clone()
-        };
+    for (let i = 0; i < nPts; i++) {
+      const ka = chain[i];
+      const kb = chain[(i + 1) % nPts];
+      const ek = ka < kb ? `${ka}#${kb}` : `${kb}#${ka}`;
+      for (const ti of (edgeToTriangles.get(ek) || [])) {
+        const tri = triangles[ti];
+        const triNormWorld = tri.normal.clone().applyMatrix3(normalMatrix).normalize();
+        if (Math.abs(triNormWorld.dot(fittedNorm)) < 0.35) cylSeeds.push(ti);
       }
     }
+
+    let depth = 0;
+    let centerWorld = rimCenterWorld.clone();
+    let topCenterWorld = rimCenterWorld.clone();
+    let bottomCenterWorld = rimCenterWorld.clone();
+    let cylTriangles = [];
+    let visitedCyl = new Set();
+    let isHole = true;
+    let cylGeom = null;
+
+    if (cylSeeds.length > 0) {
+      const cylQueue = [...cylSeeds];
+      cylSeeds.forEach(ti => visitedCyl.add(ti));
+      cylTriangles = cylSeeds.map(ti => triangles[ti]);
+
+      while (cylQueue.length > 0 && cylTriangles.length < 20000) {
+        const curIdx = cylQueue.shift();
+        const curTri = triangles[curIdx];
+
+        for (const ek of curTri.edges) {
+          if (creaseEdgeSet.has(ek)) continue;
+          for (const ni of (edgeToTriangles.get(ek) || [])) {
+            if (visitedCyl.has(ni)) continue;
+            const nbr = triangles[ni];
+            const nbrNormWorld = nbr.normal.clone().applyMatrix3(normalMatrix).normalize();
+            if (Math.abs(nbrNormWorld.dot(fittedNorm)) > 0.20) continue;
+
+            let vertsOk = true;
+            for (let k = 0; k < 3; k++) {
+              tempV.fromBufferAttribute(pos, nbr.indices[k]).applyMatrix4(mesh.matrixWorld);
+              const proj = centerAxis.clone().addScaledVector(fittedNorm, tempV.dot(fittedNorm));
+              if (Math.abs(tempV.distanceTo(proj) - radius) > radTol) {
+                vertsOk = false;
+                break;
+              }
+            }
+            if (!vertsOk) continue;
+
+            visitedCyl.add(ni);
+            cylTriangles.push(nbr);
+            cylQueue.push(ni);
+          }
+        }
+      }
+
+      // Check whether seed triangle actually belongs to this cylinder (or touches its circular rim)
+      const chainEdges = new Set();
+      for (let ci = 0; ci < nPts; ci++) {
+        const ka = chain[ci], kb = chain[(ci + 1) % nPts];
+        chainEdges.add(ka < kb ? `${ka}#${kb}` : `${kb}#${ka}`);
+      }
+      const seedTouchesRim = seedTri.edges.some(ek => chainEdges.has(ek));
+      if (visitedCyl.size > 0 && !visitedCyl.has(seedTriangleIndex) && !seedTouchesRim) {
+        continue;
+      }
+
+      let hMin = Infinity, hMax = -Infinity;
+      const cylPositions = new Float32Array(cylTriangles.length * 9);
+      let cOffset = 0;
+      for (const tri of cylTriangles) {
+        for (let k = 0; k < 3; k++) {
+          tempV.fromBufferAttribute(pos, tri.indices[k]).applyMatrix4(mesh.matrixWorld);
+          cylPositions[cOffset++] = tempV.x;
+          cylPositions[cOffset++] = tempV.y;
+          cylPositions[cOffset++] = tempV.z;
+          const h = tempV.dot(fittedNorm);
+          if (h < hMin) hMin = h;
+          if (h > hMax) hMax = h;
+        }
+      }
+      depth = Math.max(0, hMax - hMin);
+      centerWorld = centerAxis.clone().addScaledVector(fittedNorm, (hMin + hMax) * 0.5);
+      topCenterWorld = centerAxis.clone().addScaledVector(fittedNorm, hMax);
+      bottomCenterWorld = centerAxis.clone().addScaledVector(fittedNorm, hMin);
+
+      cylGeom = new THREE.BufferGeometry();
+      cylGeom.setAttribute('position', new THREE.BufferAttribute(cylPositions, 3));
+      cylGeom.computeVertexNormals();
+
+      const sampleV = new THREE.Vector3().fromBufferAttribute(pos, cylTriangles[0].indices[0]).applyMatrix4(mesh.matrixWorld);
+      const sampleProj = centerAxis.clone().addScaledVector(fittedNorm, sampleV.dot(fittedNorm));
+      const radDir = new THREE.Vector3().subVectors(sampleV, sampleProj).normalize();
+      const triNormWorld = cylTriangles[0].normal.clone().applyMatrix3(normalMatrix).normalize();
+      isHole = radDir.dot(triNormWorld) < 0;
+    }
+
+    const hitH = (hitPoint || centerWorld).dot(fittedNorm);
+    const nearRimH = Math.abs(hitH - bottomCenterWorld.dot(fittedNorm)) < Math.abs(hitH - topCenterWorld.dot(fittedNorm)) ? bottomCenterWorld.dot(fittedNorm) : topCenterWorld.dot(fittedNorm);
+    const farRimH = nearRimH === bottomCenterWorld.dot(fittedNorm) ? topCenterWorld.dot(fittedNorm) : bottomCenterWorld.dot(fittedNorm);
+    const nearestRimCenterWorld = centerAxis.clone().addScaledVector(fittedNorm, nearRimH);
+    const otherRimCenterWorld = centerAxis.clone().addScaledVector(fittedNorm, farRimH);
+
+    return {
+      type: depth > 0.05 ? 'cylinder' : 'circle',
+      isHole,
+      isArc,
+      spanDeg: arcSpanDeg,
+      startAngle,
+      endAngle,
+      label: depth > 0.05 ? (isHole ? 'Orificio Cilíndrico' : (isArc ? 'Cilindro / Arco' : 'Cilindro / Eje')) : (isArc ? 'Arco Circular' : 'Arista Circular'),
+      mesh,
+      radius,
+      diameter,
+      depth,
+      center: centerWorld,
+      rimCenter: nearestRimCenterWorld,
+      otherRimCenter: otherRimCenterWorld,
+      topCenter: topCenterWorld,
+      bottomCenter: bottomCenterWorld,
+      axis: fittedNorm,
+      U,
+      V,
+      cylinderGeometry: cylGeom,
+      boundaryGeometry: null,
+      triangleIndicesSet: visitedCyl.size > 0 ? visitedCyl : new Set([seedTriangleIndex]),
+      trianglesCount: cylTriangles.length || chain.length,
+      hitPoint: hitPoint ? hitPoint.clone() : centerWorld.clone(),
+      method: 'rim'
+    };
   }
 
-  // 2. SECONDARY: Cylinder Wall Detection (when user clicks on a cylindrical wall)
-  // On a cylindrical surface, neighboring facets curve continuously.
+  // If seed triangle belongs to a multi-triangle flat planar face, do NOT treat as cylinder wall!
+  if (planarTrianglesSet && planarTrianglesSet.has(seedTriangleIndex)) {
+    return null;
+  }
+
+  // 2. SECONDARY: Direct Cylinder Wall Detection
   let candidateAxis = null;
   const bfsQueue = [seedTriangleIndex];
   const bfsVisited = new Set([seedTriangleIndex]);
-  const maxBfsSearch = 64;
+  const localCurvedTriangles = [seedTri];
 
-  while (bfsQueue.length > 0 && bfsVisited.size < maxBfsSearch && !candidateAxis) {
+  while (bfsQueue.length > 0 && bfsVisited.size < 40) {
     const curIdx = bfsQueue.shift();
     const curTri = triangles[curIdx];
 
     for (const ek of curTri.edges) {
-      const nbrs = edgeToTriangles.get(ek) || [];
-      for (const ni of nbrs) {
+      if (creaseEdgeSet.has(ek)) continue;
+      for (const ni of (edgeToTriangles.get(ek) || [])) {
         if (bfsVisited.has(ni)) continue;
         bfsVisited.add(ni);
         const nbr = triangles[ni];
         const dot = seedTri.normal.dot(nbr.normal);
-        // Adjacent facets on a cylinder have dot between 0.70 (coarse 8-gon) and 0.9995
         if (dot > 0.70 && dot < 0.9995) {
-          const cross = new THREE.Vector3().crossVectors(seedTri.normal, nbr.normal);
-          if (cross.lengthSq() > 1e-6) {
-            candidateAxis = cross.normalize();
-            break;
+          localCurvedTriangles.push(nbr);
+          bfsQueue.push(ni);
+          if (!candidateAxis) {
+            const cross = new THREE.Vector3().crossVectors(seedTri.normal, nbr.normal);
+            if (cross.lengthSq() > 1e-6) candidateAxis = cross.normalize();
           }
         }
-        bfsQueue.push(ni);
       }
-      if (candidateAxis) break;
     }
   }
 
@@ -1519,204 +1502,183 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
     canonicalizeAxis(worldAxis);
     const { U, V } = getOrthonormalBasis(worldAxis);
 
-    const queue = [seedTriangleIndex];
-    const visited = new Set([seedTriangleIndex]);
-    const cylTriangles = [seedTri];
-    const maxTris = 20000;
-
-    while (queue.length > 0 && cylTriangles.length < maxTris) {
-      const curIdx = queue.shift();
-      const curTri = triangles[curIdx];
-
-      for (const ek of curTri.edges) {
-        const nbrs = edgeToTriangles.get(ek) || [];
-        for (const ni of nbrs) {
-          if (visited.has(ni)) continue;
-          const nbr = triangles[ni];
-          if (Math.abs(nbr.normal.dot(candidateAxis)) > 0.16) continue;
-
-          visited.add(ni);
-          cylTriangles.push(nbr);
-          queue.push(ni);
+    const localVerts = new Map();
+    for (const tri of localCurvedTriangles) {
+      for (const idx of tri.indices) {
+        if (!localVerts.has(idx)) {
+          tempV.fromBufferAttribute(pos, idx).applyMatrix4(mesh.matrixWorld);
+          localVerts.set(idx, tempV.clone());
         }
       }
     }
+    const localFit = fitCircle2D(Array.from(localVerts.values()).map(p => ({ u: p.dot(U), v: p.dot(V) })));
+    if (localFit && localFit.r >= 0.5 && localFit.relError <= 0.035 && localFit.maxResidual <= Math.max(0.4, localFit.r * 0.02)) {
+      const expectedRadius = localFit.r;
+      const centerAxis = new THREE.Vector3().addScaledVector(U, localFit.uc).addScaledVector(V, localFit.vc);
+      const radTol = Math.max(0.6, expectedRadius * 0.08);
 
-    // A real cylinder requires multiple facets
-    if (cylTriangles.length >= 8) {
-      const uniqueVerts = new Map();
-      const tempV = new THREE.Vector3();
+      const queue = [seedTriangleIndex];
+      const visited = new Set([seedTriangleIndex]);
+      const cylTriangles = [seedTri];
 
-      for (const tri of cylTriangles) {
-        for (const idx of tri.indices) {
-          if (!uniqueVerts.has(idx)) {
-            tempV.fromBufferAttribute(pos, idx).applyMatrix4(mesh.matrixWorld);
-            uniqueVerts.set(idx, tempV.clone());
+      while (queue.length > 0 && cylTriangles.length < 20000) {
+        const curIdx = queue.shift();
+        const curTri = triangles[curIdx];
+
+        for (const ek of curTri.edges) {
+          if (creaseEdgeSet.has(ek)) continue;
+          for (const ni of (edgeToTriangles.get(ek) || [])) {
+            if (visited.has(ni)) continue;
+            const nbr = triangles[ni];
+            if (Math.abs(nbr.normal.dot(candidateAxis)) > 0.18) continue;
+
+            let vertsOk = true;
+            for (let k = 0; k < 3; k++) {
+              tempV.fromBufferAttribute(pos, nbr.indices[k]).applyMatrix4(mesh.matrixWorld);
+              const proj = centerAxis.clone().addScaledVector(worldAxis, tempV.dot(worldAxis));
+              if (Math.abs(tempV.distanceTo(proj) - expectedRadius) > radTol) {
+                vertsOk = false;
+                break;
+              }
+            }
+            if (!vertsOk) continue;
+
+            const triCentroid = new THREE.Vector3();
+            for (let k = 0; k < 3; k++) {
+              tempV.fromBufferAttribute(pos, nbr.indices[k]).applyMatrix4(mesh.matrixWorld);
+              triCentroid.add(tempV);
+            }
+            triCentroid.multiplyScalar(1 / 3);
+            const projCent = centerAxis.clone().addScaledVector(worldAxis, triCentroid.dot(worldAxis));
+            const radDir = new THREE.Vector3().subVectors(triCentroid, projCent).normalize();
+            const nbrNormWorld = nbr.normal.clone().applyMatrix3(normalMatrix).normalize();
+            if (Math.abs(nbrNormWorld.dot(radDir)) < 0.78) continue;
+
+            visited.add(ni);
+            cylTriangles.push(nbr);
+            queue.push(ni);
           }
         }
       }
 
-      if (uniqueVerts.size >= 8) {
-        const pts2D = [];
+      if (cylTriangles.length >= 4) {
+        const allVerts = new Map();
         let hMin = Infinity, hMax = -Infinity;
+        for (const tri of cylTriangles) {
+          for (const idx of tri.indices) {
+            if (!allVerts.has(idx)) {
+              tempV.fromBufferAttribute(pos, idx).applyMatrix4(mesh.matrixWorld);
+              allVerts.set(idx, tempV.clone());
+            }
+          }
+        }
 
-        for (const p of uniqueVerts.values()) {
-          const u = p.dot(U);
-          const v = p.dot(V);
+        const allPts2D = [];
+        for (const p of allVerts.values()) {
+          allPts2D.push({ u: p.dot(U), v: p.dot(V), p });
           const h = p.dot(worldAxis);
-          pts2D.push({ u, v, h, p });
           if (h < hMin) hMin = h;
           if (h > hMax) hMax = h;
         }
 
-        const fit = fitCircle2D(pts2D);
-        if (fit && fit.r >= 0.1 && fit.relError <= 0.035) {
-          // STRICT VALIDATION 1: Unique cross-section vertices (quantized by 0.1% of radius)
-          const quant2D = Math.max(1e-4, fit.r * 1e-3);
+        const finalFit = fitCircle2D(allPts2D);
+        if (finalFit && finalFit.r >= 0.5 && finalFit.relError <= 0.035 && finalFit.maxResidual <= Math.max(0.4, finalFit.r * 0.02)) {
+          const quant2D = Math.max(1e-4, finalFit.r * 1e-3);
           const unique2DMap = new Map();
-          for (const pt of pts2D) {
+          for (const pt of allPts2D) {
             const k = `${Math.round(pt.u / quant2D)}_${Math.round(pt.v / quant2D)}`;
-            if (!unique2DMap.has(k)) {
-              unique2DMap.set(k, { u: pt.u, v: pt.v });
-            }
+            if (!unique2DMap.has(k)) unique2DMap.set(k, { u: pt.u, v: pt.v });
           }
           const uniqueCrossPts = Array.from(unique2DMap.values());
-          // A rectangle only has 4 unique cross-section points! A CAD cylinder has >= 8.
-          if (uniqueCrossPts.length < 8) {
-            return null;
-          }
-
-          // STRICT VALIDATION 2: Angular distribution of unique cross-section points
-          const polarAngles = uniqueCrossPts.map(p => Math.atan2(p.v - fit.vc, p.u - fit.uc)).sort((a, b) => a - b);
-          let maxCrossGap = 0;
-          for (let i = 0; i < polarAngles.length; i++) {
-            const gap = (i === polarAngles.length - 1)
-              ? (polarAngles[0] + 2 * Math.PI - polarAngles[i])
-              : (polarAngles[i + 1] - polarAngles[i]);
-            if (gap > maxCrossGap) maxCrossGap = gap;
-          }
-          const maxCrossGapDeg = maxCrossGap * (180 / Math.PI);
-          // If closed cylinder: max gap between adjacent facets <= 52 deg (rectangle has 90 or 140 deg!)
-          if (maxCrossGapDeg > 52.0) {
-            // Check if it's a valid open arc / fillet
-            let maxArcInnerGap = 0;
-            for (let i = 0; i < polarAngles.length - 1; i++) {
-              const g = polarAngles[i + 1] - polarAngles[i];
-              if (g > maxArcInnerGap) maxArcInnerGap = g;
+          if (uniqueCrossPts.length >= 4) {
+            const polarAngles = uniqueCrossPts.map(p => Math.atan2(p.v - finalFit.vc, p.u - finalFit.uc)).sort((a, b) => a - b);
+            const mAngles = polarAngles.length;
+            const gaps = [];
+            for (let i = 0; i < mAngles - 1; i++) {
+              gaps.push({ gap: polarAngles[i + 1] - polarAngles[i], index: i });
             }
-            const totalSpanDeg = (polarAngles[polarAngles.length - 1] - polarAngles[0]) * (180 / Math.PI);
-            if (maxArcInnerGap * (180 / Math.PI) > 35.0 || totalSpanDeg < 45.0 || uniqueCrossPts.length < 6) {
-              return null;
-            }
-          }
+            gaps.push({ gap: polarAngles[0] + 2 * Math.PI - polarAngles[mAngles - 1], index: mAngles - 1 });
+            gaps.sort((a, b) => b.gap - a.gap);
 
-          const radius = fit.r;
-          const diameter = radius * 2;
-          const depth = Math.max(0.01, hMax - hMin);
+            const largestGap = gaps[0].gap;
+            const maxOtherGapDeg = (gaps.length > 1 ? gaps[1].gap : 0) * (180 / Math.PI);
+            const largestGapDeg = largestGap * (180 / Math.PI);
 
-          const centerAxis = new THREE.Vector3().addScaledVector(U, fit.uc).addScaledVector(V, fit.vc);
+            let arcSpanDeg = 360.0;
+            let isArc = false;
+            let startAngle = 0;
+            let endAngle = Math.PI * 2;
 
-          // STRICT VALIDATION 3: Centroid distance of all triangles to cylinder axis
-          let badCentroids = 0;
-          for (const tri of cylTriangles) {
-            const triCentroid = new THREE.Vector3();
-            for (let k = 0; k < 3; k++) {
-              tempV.fromBufferAttribute(pos, tri.indices[k]).applyMatrix4(mesh.matrixWorld);
-              triCentroid.add(tempV);
-            }
-            triCentroid.multiplyScalar(1 / 3);
-
-            const projOnAxis = centerAxis.clone().addScaledVector(worldAxis, triCentroid.dot(worldAxis));
-            const distToAxis = triCentroid.distanceTo(projOnAxis);
-            if (Math.abs(distToAxis - radius) / radius > 0.12) {
-              badCentroids++;
-            }
-          }
-          if (badCentroids > cylTriangles.length * 0.12) {
-            return null;
-          }
-
-          // STRICT VALIDATION 4: Normal radial alignment and normal diversity
-          const normBins = new Set();
-          let badNormals = 0;
-          for (const tri of cylTriangles) {
-            const triCentroid = new THREE.Vector3();
-            for (let k = 0; k < 3; k++) {
-              tempV.fromBufferAttribute(pos, tri.indices[k]).applyMatrix4(mesh.matrixWorld);
-              triCentroid.add(tempV);
-            }
-            triCentroid.multiplyScalar(1 / 3);
-
-            const projOnAxis = centerAxis.clone().addScaledVector(worldAxis, triCentroid.dot(worldAxis));
-            const radDir = new THREE.Vector3().subVectors(triCentroid, projOnAxis).normalize();
-            const triNormWorld = tri.normal.clone().applyMatrix3(normalMatrix).normalize();
-
-            if (Math.abs(triNormWorld.dot(radDir)) < 0.82) {
-              badNormals++;
+            if (largestGapDeg > 52.0) {
+              isArc = true;
+              arcSpanDeg = 360.0 - largestGapDeg;
+              if (arcSpanDeg < 25.0 || maxOtherGapDeg > 45.0) return null;
+              const k = gaps[0].index;
+              startAngle = polarAngles[(k + 1) % mAngles];
+              endAngle = polarAngles[k];
+              if (endAngle < startAngle) endAngle += 2 * Math.PI;
             }
 
-            const nU = triNormWorld.dot(U);
-            const nV = triNormWorld.dot(V);
-            normBins.add(Math.round(Math.atan2(nV, nU) / (Math.PI / 12)));
-          }
-          if (badNormals > cylTriangles.length * 0.15 || normBins.size < 6) {
-            return null;
-          }
+            const radius = finalFit.r;
+            const diameter = radius * 2;
+            const depth = Math.max(0.01, hMax - hMin);
+            const refinedCenterAxis = new THREE.Vector3().addScaledVector(U, finalFit.uc).addScaledVector(V, finalFit.vc);
+            const centerWorld = refinedCenterAxis.clone().addScaledVector(worldAxis, (hMin + hMax) * 0.5);
 
-          const midHeight = (hMin + hMax) * 0.5;
-          const centerWorld = centerAxis.clone().addScaledVector(worldAxis, midHeight);
+            const sampleV = allPts2D[0].p;
+            const sampleProj = refinedCenterAxis.clone().addScaledVector(worldAxis, sampleV.dot(worldAxis));
+            const radDir = new THREE.Vector3().subVectors(sampleV, sampleProj).normalize();
+            const seedNormalWorld = seedTri.normal.clone().applyMatrix3(normalMatrix).normalize();
+            const isHole = radDir.dot(seedNormalWorld) < 0;
 
-          const hitH = hitPoint.dot(worldAxis);
-          const nearRimH = Math.abs(hitH - hMin) < Math.abs(hitH - hMax) ? hMin : hMax;
-          const farRimH = nearRimH === hMin ? hMax : hMin;
-          const rimCenterWorld = centerAxis.clone().addScaledVector(worldAxis, nearRimH);
-          const otherRimCenterWorld = centerAxis.clone().addScaledVector(worldAxis, farRimH);
-          const topCenter = centerAxis.clone().addScaledVector(worldAxis, hMax);
-          const bottomCenter = centerAxis.clone().addScaledVector(worldAxis, hMin);
+            const hitH = (hitPoint || centerWorld).dot(worldAxis);
+            const nearRimH = Math.abs(hitH - hMin) < Math.abs(hitH - hMax) ? hMin : hMax;
+            const farRimH = nearRimH === hMin ? hMax : hMin;
+            const rimCenterWorld = refinedCenterAxis.clone().addScaledVector(worldAxis, nearRimH);
+            const otherRimCenterWorld = refinedCenterAxis.clone().addScaledVector(worldAxis, farRimH);
 
-          const sampleV = pts2D[0].p;
-          const sampleProj = centerAxis.clone().addScaledVector(worldAxis, sampleV.dot(worldAxis));
-          const radDir = new THREE.Vector3().subVectors(sampleV, sampleProj).normalize();
-          const seedNormalWorld = seedTri.normal.clone().applyMatrix3(normalMatrix).normalize();
-          const isHole = radDir.dot(seedNormalWorld) < 0;
-
-          const vertexPositions = new Float32Array(cylTriangles.length * 9);
-          let vOffset = 0;
-          for (const tri of cylTriangles) {
-            for (let k = 0; k < 3; k++) {
-              tempV.fromBufferAttribute(pos, tri.indices[k]).applyMatrix4(mesh.matrixWorld);
-              vertexPositions[vOffset++] = tempV.x;
-              vertexPositions[vOffset++] = tempV.y;
-              vertexPositions[vOffset++] = tempV.z;
+            const cylPositions = new Float32Array(cylTriangles.length * 9);
+            let cOffset = 0;
+            for (const tri of cylTriangles) {
+              for (let k = 0; k < 3; k++) {
+                tempV.fromBufferAttribute(pos, tri.indices[k]).applyMatrix4(mesh.matrixWorld);
+                cylPositions[cOffset++] = tempV.x;
+                cylPositions[cOffset++] = tempV.y;
+                cylPositions[cOffset++] = tempV.z;
+              }
             }
+            const cylGeom = new THREE.BufferGeometry();
+            cylGeom.setAttribute('position', new THREE.BufferAttribute(cylPositions, 3));
+            cylGeom.computeVertexNormals();
+
+            return {
+              type: 'cylinder',
+              isHole,
+              isArc,
+              spanDeg: arcSpanDeg,
+              startAngle,
+              endAngle,
+              label: isHole ? 'Orificio Cilíndrico' : (isArc ? 'Cilindro / Arco' : 'Cilindro / Eje'),
+              mesh,
+              radius,
+              diameter,
+              depth,
+              center: centerWorld,
+              rimCenter: rimCenterWorld,
+              otherRimCenter: otherRimCenterWorld,
+              topCenter: refinedCenterAxis.clone().addScaledVector(worldAxis, hMax),
+              bottomCenter: refinedCenterAxis.clone().addScaledVector(worldAxis, hMin),
+              axis: worldAxis,
+              U,
+              V,
+              cylinderGeometry: cylGeom,
+              boundaryGeometry: null,
+              triangleIndicesSet: visited,
+              trianglesCount: cylTriangles.length,
+              hitPoint: hitPoint ? hitPoint.clone() : centerWorld.clone(),
+              method: 'wall'
+            };
           }
-
-          const cylinderGeometry = new THREE.BufferGeometry();
-          cylinderGeometry.setAttribute('position', new THREE.BufferAttribute(vertexPositions, 3));
-          cylinderGeometry.computeVertexNormals();
-
-          return {
-            type: 'cylinder',
-            isHole,
-            label: isHole ? 'Orificio Cilíndrico' : 'Cilindro / Eje',
-            mesh,
-            radius,
-            diameter,
-            depth,
-            center: centerWorld,
-            rimCenter: rimCenterWorld,
-            otherRimCenter: otherRimCenterWorld,
-            topCenter,
-            bottomCenter,
-            axis: worldAxis,
-            U,
-            V,
-            cylinderGeometry,
-            boundaryGeometry: null,
-            triangleIndicesSet: visited,
-            trianglesCount: cylTriangles.length,
-            hitPoint: hitPoint.clone()
-          };
         }
       }
     }
@@ -3319,21 +3281,25 @@ export class MeasurementTool {
   computeSingleCylinderMeasurement(cylData) {
     const plane = (this.viewer && this.viewer.sectionActive) ? this.viewer.sectionPlane : null;
     const centerPoint = this.findVisibleCylinderAnchor(cylData, plane) || cylData.topCenter || cylData.rimCenter || cylData.center || cylData.hitPoint;
+    const isArc = !!cylData.isArc;
+    const spanText = (isArc && cylData.spanDeg) ? ` | Arco: ${cylData.spanDeg.toFixed(1)}°` : '';
+    const arcBadgeText = `Ø ${cylData.diameter.toFixed(2)} mm (R: ${cylData.radius.toFixed(2)} mm)`;
     this.currentMeasurement = {
       type: 'cylinder_single',
-      title: cylData.label || 'Orificio Cilíndrico',
+      title: cylData.label || (isArc ? 'Cilindro / Arco Parcial' : 'Orificio Cilíndrico'),
       distance: cylData.diameter,
       unit: 'mm',
-      primaryValue: `Ø ${cylData.diameter.toFixed(2)} mm`,
-      secondaryValue: `Radio: ${cylData.radius.toFixed(2)} mm${cylData.depth > 0.05 ? ` | Profundidad: ${cylData.depth.toFixed(2)} mm` : ''}`,
+      primaryValue: arcBadgeText,
+      secondaryValue: `Radio: ${cylData.radius.toFixed(2)} mm${spanText}${cylData.depth > 0.05 ? ` | Profundidad: ${cylData.depth.toFixed(2)} mm` : ''}`,
       targetMeshes: [cylData.mesh].filter(Boolean),
       targetPoints: centerPoint ? [centerPoint.clone()] : [],
       cylData: cylData,
       details: [
         { label: 'Diámetro (Ø)', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
         { label: 'Radio (R)', value: `${cylData.radius.toFixed(2)} mm` },
+        ...(isArc && cylData.spanDeg ? [{ label: 'Ángulo del Arco', value: `${cylData.spanDeg.toFixed(1)}°` }] : []),
         { label: 'Profundidad / Longitud', value: cylData.depth > 0.05 ? `${cylData.depth.toFixed(2)} mm` : '0.00 mm (Plano)' },
-        { label: 'Tipo Geométrico', value: cylData.isCutCircle ? 'Círculo de Sección (Corte)' : (cylData.isHole ? 'Orificio Interior (Bore/Hole)' : 'Cilindro Exterior (Pin/Shaft)') },
+        { label: 'Tipo Geométrico', value: cylData.isCutCircle ? 'Círculo de Sección (Corte)' : (isArc ? 'Cilindro / Arco Parcial' : (cylData.isHole ? 'Orificio Interior (Bore/Hole)' : 'Cilindro Exterior (Pin/Shaft)')) },
         { label: 'Centro 3D (Borde)', value: formatVec3(centerPoint) },
         { label: 'Eje 3D', value: `[${cylData.axis.x.toFixed(2)}, ${cylData.axis.y.toFixed(2)}, ${cylData.axis.z.toFixed(2)}]` },
         { label: 'Facetas interpoladas', value: `${cylData.trianglesCount} triángulos` }
@@ -3343,14 +3309,14 @@ export class MeasurementTool {
     this.badges = [{
       id: 'measure-main',
       worldPos: centerPoint.clone(),
-      text: `Ø ${cylData.diameter.toFixed(2)} mm`,
+      text: arcBadgeText,
       targetCylinders: [cylData],
       screenX: 0,
       screenY: 0,
       visible: false
     }];
 
-    this.statusPrompt = `${cylData.label} 1 fijado (Ø ${cylData.diameter.toFixed(2)} mm). Haz clic en otro elemento para medir relación...`;
+    this.statusPrompt = `${cylData.label} 1 fijado (${arcBadgeText}). Haz clic en otro elemento para medir relación...`;
     this.emitUpdate();
   }
 
@@ -4623,7 +4589,9 @@ export class MeasurementTool {
       let halfW = getAdaptiveRingHalfWidth(cylData.radius, isHover);
       if (!isPrimary) halfW *= 0.75;
       const order = isHover ? 3012 : (isPrimary ? 3018 : 3014);
-      return createThickRingMesh(centerPt, cylData.U, cylData.V, cylData.radius, halfW, colorHex, isHover, order, !this.xray);
+      const startAngle = (cylData.isArc && cylData.startAngle !== undefined) ? cylData.startAngle : 0;
+      const endAngle = (cylData.isArc && cylData.endAngle !== undefined) ? cylData.endAngle : Math.PI * 2;
+      return createThickRingMesh(centerPt, cylData.U, cylData.V, cylData.radius, halfW, colorHex, isHover, order, !this.xray, startAngle, endAngle);
     };
 
     const plane = (this.viewer && this.viewer.sectionActive) ? this.viewer.sectionPlane : null;
