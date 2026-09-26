@@ -385,6 +385,64 @@ export function isEdgeVisibleUnderPlane(edgeData, plane) {
 export function isCylinderVisibleUnderPlane(cylData, plane) {
   if (!cylData || !plane) return true;
   if (cylData.isCutCircle) return true;
+
+  // 1. Analytical test:
+  // The signed distance of any point on the cylinder (radius R, axis a, centers C_bottom/C_top)
+  // to plane (n, d) is at most:
+  // dist_max = max(plane.distanceToPoint(C_bottom), plane.distanceToPoint(C_top)) + R * ||n x a||
+  const R = cylData.radius || 0;
+  const axis = cylData.axis;
+  const c1 = cylData.topCenter || cylData.rimCenter || cylData.center;
+  const c2 = cylData.bottomCenter || cylData.otherRimCenter || cylData.center || c1;
+
+  if (c1 && axis && R > 0) {
+    const dotAxis = Math.min(1.0, Math.max(-1.0, plane.normal.dot(axis)));
+    const sinAngle = Math.sqrt(Math.max(0, 1.0 - dotAxis * dotAxis));
+    const radialSpan = R * sinAngle;
+
+    const d1 = plane.distanceToPoint(c1);
+    const d2 = c2 ? plane.distanceToPoint(c2) : d1;
+    const maxAxisDist = Math.max(d1, d2);
+    const maxCylinderDist = maxAxisDist + radialSpan;
+
+    // If even the furthest point on the cylinder is behind the plane,
+    // the cylinder is 100% cut away and completely invisible.
+    if (maxCylinderDist < -0.005) {
+      return false;
+    }
+  }
+
+  // 2. Mesh vertices test:
+  // If the cylinder has associated mesh triangles, check if at least one vertex is visible.
+  if (cylData.mesh && cylData.mesh.geometry && cylData.triangleIndicesSet && cylData.triangleIndicesSet.size > 0) {
+    const pos = cylData.mesh.geometry.attributes.position;
+    const idxAttr = cylData.mesh.geometry.index;
+    const matrixWorld = cylData.mesh.matrixWorld;
+    if (pos) {
+      const tempV = new THREE.Vector3();
+      let hasVisibleVert = false;
+      const triIndices = Array.from(cylData.triangleIndicesSet);
+      const step = Math.max(1, Math.floor(triIndices.length / 80));
+      for (let i = 0; i < triIndices.length; i += step) {
+        const triIdx = triIndices[i];
+        for (let k = 0; k < 3; k++) {
+          const ptr = triIdx * 3 + k;
+          const vertIdx = idxAttr ? idxAttr.getX(ptr) : ptr;
+          if (vertIdx < pos.count) {
+            tempV.fromBufferAttribute(pos, vertIdx).applyMatrix4(matrixWorld);
+            if (plane.distanceToPoint(tempV) >= -0.005) {
+              hasVisibleVert = true;
+              break;
+            }
+          }
+        }
+        if (hasVisibleVert) break;
+      }
+      return hasVisibleVert;
+    }
+  }
+
+  // Fallback: test available reference points
   const pts = [
     cylData.topCenter,
     cylData.bottomCenter,
@@ -396,12 +454,6 @@ export function isCylinderVisibleUnderPlane(cylData, plane) {
   for (let i = 0; i < pts.length; i++) {
     if (plane.distanceToPoint(pts[i]) >= -0.005) return true;
   }
-  // Check if section plane intersects the axis between bottom and top
-  if (cylData.bottomCenter && cylData.topCenter && cylData.axis) {
-    const d1 = plane.distanceToPoint(cylData.bottomCenter);
-    const d2 = plane.distanceToPoint(cylData.topCenter);
-    if ((d1 >= -0.005 && d2 < -0.005) || (d1 < -0.005 && d2 >= -0.005)) return true;
-  }
   return false;
 }
 
@@ -412,6 +464,11 @@ export function findVisibleCylinderAnchor(cylData, plane) {
   if (!cylData) return null;
   const defaultPt = cylData.topCenter || cylData.rimCenter || cylData.center || cylData.hitPoint;
   if (!plane) return defaultPt;
+
+  // If the cylinder is completely cut away by the section plane, there is no visible anchor
+  if (!isCylinderVisibleUnderPlane(cylData, plane)) {
+    return null;
+  }
 
   // 1. If default point (topCenter/rimCenter) is visible, use it
   if (defaultPt && plane.distanceToPoint(defaultPt) >= -0.005) {
@@ -451,7 +508,37 @@ export function findVisibleCylinderAnchor(cylData, plane) {
     return cylData.hitPoint;
   }
 
-  return defaultPt;
+  // 6. If cylinder has visible mesh triangles, anchor to the most visible vertex
+  if (cylData.mesh && cylData.mesh.geometry && cylData.triangleIndicesSet && cylData.triangleIndicesSet.size > 0) {
+    const pos = cylData.mesh.geometry.attributes.position;
+    const idxAttr = cylData.mesh.geometry.index;
+    const matrixWorld = cylData.mesh.matrixWorld;
+    if (pos) {
+      const tempV = new THREE.Vector3();
+      const triIndices = Array.from(cylData.triangleIndicesSet);
+      const step = Math.max(1, Math.floor(triIndices.length / 80));
+      let bestPt = null;
+      let maxDist = -Infinity;
+      for (let i = 0; i < triIndices.length; i += step) {
+        const triIdx = triIndices[i];
+        for (let k = 0; k < 3; k++) {
+          const ptr = triIdx * 3 + k;
+          const vertIdx = idxAttr ? idxAttr.getX(ptr) : ptr;
+          if (vertIdx < pos.count) {
+            tempV.fromBufferAttribute(pos, vertIdx).applyMatrix4(matrixWorld);
+            const d = plane.distanceToPoint(tempV);
+            if (d >= -0.005 && d > maxDist) {
+              maxDist = d;
+              bestPt = tempV.clone();
+            }
+          }
+        }
+      }
+      if (bestPt) return bestPt;
+    }
+  }
+
+  return null;
 }
 
 /**
@@ -2956,6 +3043,9 @@ export class MeasurementTool {
         : `Pared mín.: ${wallClearance.toFixed(2)} mm | Ejes ${isParallel ? 'Paralelos (0.0°)' : `${closest.angleDeg.toFixed(1)}°`}`,
       targetMeshes: [cyl1.mesh, cyl2.mesh].filter(Boolean),
       targetPoints: [C1, C2].filter(Boolean),
+      targetCylinders: [cyl1, cyl2],
+      cyl1,
+      cyl2,
       details: [
         { label: 'Relación / Ajuste', value: isConcentric ? 'Concéntricos (Ejes coincidentes 0.0°)' : (isNested ? 'Encaje con Excentricidad' : (isParallel ? 'Paralelos' : `Ángulo: ${closest.angleDeg.toFixed(1)}°`)) },
         { label: 'Holgura / Juego Radial', value: isNested ? `${Math.max(0, radialClearance).toFixed(2)} mm (por lado)` : `${wallClearance.toFixed(2)} mm (entre paredes)` },
@@ -3311,6 +3401,7 @@ export class MeasurementTool {
       targetMeshes: [cylData.mesh].filter(Boolean),
       targetPoints: centerPoint ? [centerPoint.clone()] : [],
       cylData: cylData,
+      targetCylinders: [cylData],
       details: [
         { label: 'Diámetro (Ø)', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
         { label: 'Radio (R)', value: `${cylData.radius.toFixed(2)} mm` },
@@ -3364,6 +3455,8 @@ export class MeasurementTool {
       secondaryValue: `ΔX: ${deltaX.toFixed(1)} | ΔY: ${deltaY.toFixed(1)} | ΔZ: ${deltaZ.toFixed(1)} mm`,
       targetMeshes: [edgeData.mesh].filter(Boolean),
       targetPoints: [edgeData.p1, edgeData.p2].filter(Boolean),
+      targetEdges: [edgeData],
+      edgeData: edgeData,
       details: [
         { label: isCut ? 'Longitud de Arista de Corte' : 'Longitud de Arista', value: `${edgeData.length.toFixed(2)} mm` },
         { label: 'Tipo de Elemento', value: isCut ? 'Arista de Corte Dinámica (Sección Activa)' : 'Arista CAD' },
@@ -3382,6 +3475,7 @@ export class MeasurementTool {
       id: 'measure-main',
       worldPos: edgeData.midpoint.clone(),
       text: `${edgeData.length.toFixed(2)} mm`,
+      targetEdges: [edgeData],
       screenX: 0,
       screenY: 0,
       visible: false
@@ -3439,6 +3533,9 @@ export class MeasurementTool {
           : `${bothCut ? 'Espesor / separación' : 'Distancia perpendicular'}: ${perpDist.toFixed(2)} mm | Paralelas (0.0°)`,
         targetMeshes: [edge1.mesh, edge2.mesh].filter(Boolean),
         targetPoints: [edge1.midpoint, edge2.midpoint].filter(Boolean),
+        targetEdges: [edge1, edge2],
+        edge1,
+        edge2,
         details: [
           { label: bothCut ? 'Espesor / Distancia Perpendicular' : 'Distancia Perpendicular', value: `${perpDist.toFixed(2)} mm` },
           { label: 'Distancia Mínima entre Segmentos', value: `${segRes.dist.toFixed(2)} mm` },
@@ -3476,6 +3573,9 @@ export class MeasurementTool {
           : `Distancia mínima entre aristas: ${segRes.dist.toFixed(2)} mm`,
         targetMeshes: [edge1.mesh, edge2.mesh].filter(Boolean),
         targetPoints: [edge1.midpoint, edge2.midpoint].filter(Boolean),
+        targetEdges: [edge1, edge2],
+        edge1,
+        edge2,
         details: [
           { label: 'Ángulo entre Aristas', value: `${angleDeg.toFixed(1)}°` },
           { label: 'Ángulo Suplementario', value: `${(180 - angleDeg).toFixed(1)}°` },
@@ -3526,6 +3626,10 @@ export class MeasurementTool {
         secondaryValue: `Longitud arista: ${edgeData.length.toFixed(2)} mm | Paralela a la cara (0.0°)`,
         targetMeshes: [edgeData.mesh, faceData.mesh].filter(Boolean),
         targetPoints: [edgeData.midpoint, P_face].filter(Boolean),
+        targetEdges: [edgeData],
+        targetFaces: [faceData],
+        edgeData,
+        faceData,
         details: [
           { label: 'Distancia Perpendicular', value: `${perpDist.toFixed(2)} mm` },
           { label: 'Longitud de Arista', value: `${edgeData.length.toFixed(2)} mm` },
@@ -3551,6 +3655,8 @@ export class MeasurementTool {
         id: 'measure-main',
         worldPos: edgeData.midpoint.clone().add(projOnPlane).multiplyScalar(0.5),
         text: `⟂ ${perpDist.toFixed(2)} mm`,
+        targetEdges: [edgeData],
+        targetFaces: [faceData],
         screenX: 0,
         screenY: 0,
         visible: false
@@ -3570,6 +3676,10 @@ export class MeasurementTool {
         secondaryValue: `Longitud arista: ${edgeData.length.toFixed(2)} mm`,
         targetMeshes: [edgeData.mesh, faceData.mesh].filter(Boolean),
         targetPoints: [edgeData.midpoint, P_face].filter(Boolean),
+        targetEdges: [edgeData],
+        targetFaces: [faceData],
+        edgeData,
+        faceData,
         details: [
           { label: 'Ángulo con la Superficie', value: `${angleDeg.toFixed(1)}°` },
           { label: 'Ángulo con la Normal', value: `${(90 - angleDeg).toFixed(1)}°` },
@@ -3585,6 +3695,8 @@ export class MeasurementTool {
         id: 'measure-main',
         worldPos: mid.clone(),
         text: `∠ ${angleDeg.toFixed(1)}°`,
+        targetEdges: [edgeData],
+        targetFaces: [faceData],
         screenX: 0,
         screenY: 0,
         visible: false
@@ -3616,6 +3728,8 @@ export class MeasurementTool {
       secondaryValue: `Longitud arista: ${edgeData.length.toFixed(2)} mm`,
       targetMeshes: [edgeData.mesh, ptMesh].filter(Boolean),
       targetPoints: [edgeData.midpoint, point].filter(Boolean),
+      targetEdges: [edgeData],
+      edgeData: edgeData,
       details: [
         { label: 'Distancia Perpendicular', value: `${dist.toFixed(2)} mm` },
         { label: 'Longitud de Arista', value: `${edgeData.length.toFixed(2)} mm` },
@@ -3639,6 +3753,8 @@ export class MeasurementTool {
       id: 'measure-main',
       worldPos: mid.clone(),
       text: `${dist.toFixed(2)} mm`,
+      targetEdges: [edgeData],
+      targetPoints: [point],
       screenX: 0,
       screenY: 0,
       visible: false
@@ -3671,6 +3787,10 @@ export class MeasurementTool {
       secondaryValue: `Distancia a la pared: ${surfDist.toFixed(2)} mm | Ø ${cylData.diameter.toFixed(2)} mm`,
       targetMeshes: [edgeData.mesh, cylData.mesh].filter(Boolean),
       targetPoints: [edgeData.midpoint, cylData.center || cylData.topCenter].filter(Boolean),
+      targetEdges: [edgeData],
+      targetCylinders: [cylData],
+      edgeData: edgeData,
+      cylData: cylData,
       details: [
         { label: 'Distancia al Eje Cilíndrico', value: `${axisDist.toFixed(2)} mm` },
         { label: 'Distancia a la Superficie / Pared', value: `${surfDist.toFixed(2)} mm` },
@@ -3693,6 +3813,8 @@ export class MeasurementTool {
       id: 'measure-main',
       worldPos: mid.clone(),
       text: `${axisDist.toFixed(2)} mm`,
+      targetEdges: [edgeData],
+      targetCylinders: [cylData],
       screenX: 0,
       screenY: 0,
       visible: false
@@ -3730,6 +3852,8 @@ export class MeasurementTool {
       secondaryValue: isCoplanar ? 'El punto está sobre la cara' : `Directa a centro: ${directDist.toFixed(2)} mm`,
       targetMeshes: [faceData.mesh, ptMesh].filter(Boolean),
       targetPoints: [point, P_face].filter(Boolean),
+      targetFaces: [faceData],
+      faceData: faceData,
       details: [
         { label: 'Distancia Perpendicular', value: `${perpDist.toFixed(2)} mm` },
         { label: 'Distancia Directa al Centro', value: `${directDist.toFixed(2)} mm` },
@@ -3763,6 +3887,8 @@ export class MeasurementTool {
       id: 'measure-main',
       worldPos: mid,
       text: isCoplanar ? '0.00 mm (Coplanar)' : `⟂ ${perpDist.toFixed(2)} mm`,
+      targetFaces: [faceData],
+      targetPoints: [point],
       screenX: 0,
       screenY: 0,
       visible: false
@@ -3802,6 +3928,8 @@ export class MeasurementTool {
       secondaryValue: `A la pared: ${surfDist.toFixed(2)} mm (${isInside ? 'Interior' : 'Exterior'}) | Ø ${cylData.diameter.toFixed(2)} mm`,
       targetMeshes: [cylData.mesh, ptMesh].filter(Boolean),
       targetPoints: [point, cylData.center || cylData.topCenter].filter(Boolean),
+      targetCylinders: [cylData],
+      cylData: cylData,
       details: [
         { label: 'Distancia Perpendicular al Eje', value: `${axisDist.toFixed(2)} mm` },
         { label: 'Distancia a la Superficie / Pared', value: `${surfDist.toFixed(2)} mm` },
@@ -3837,6 +3965,8 @@ export class MeasurementTool {
       id: 'measure-main',
       worldPos: mid,
       text: `${axisDist.toFixed(2)} mm`,
+      targetCylinders: [cylData],
+      targetPoints: [point],
       screenX: 0,
       screenY: 0,
       visible: false
@@ -3873,6 +4003,10 @@ export class MeasurementTool {
         secondaryValue: `Pared a cara: ${wallDist.toFixed(2)} mm | Ø ${cylData.diameter.toFixed(2)} mm | Eje paralelo (0.0°)`,
         targetMeshes: [faceData.mesh, cylData.mesh].filter(Boolean),
         targetPoints: [P_face, cylData.center || cylData.topCenter].filter(Boolean),
+        targetFaces: [faceData],
+        targetCylinders: [cylData],
+        faceData: faceData,
+        cylData: cylData,
         details: [
           { label: 'Distancia Eje a Cara', value: `${axisDist.toFixed(2)} mm` },
           { label: 'Espesor Mínimo (Pared a Cara)', value: `${wallDist.toFixed(2)} mm` },
@@ -3897,6 +4031,8 @@ export class MeasurementTool {
         id: 'measure-main',
         worldPos: mid,
         text: `⟂ ${axisDist.toFixed(2)} mm`,
+        targetFaces: [faceData],
+        targetCylinders: [cylData],
         screenX: 0,
         screenY: 0,
         visible: false
@@ -3917,6 +4053,10 @@ export class MeasurementTool {
         secondaryValue: `Ø ${cylData.diameter.toFixed(2)} mm | Ángulo con la normal: ${(90 - angleDeg).toFixed(1)}°`,
         targetMeshes: [faceData.mesh, cylData.mesh].filter(Boolean),
         targetPoints: [P_face, cylData.center || cylData.topCenter].filter(Boolean),
+        targetFaces: [faceData],
+        targetCylinders: [cylData],
+        faceData: faceData,
+        cylData: cylData,
         details: [
           { label: 'Ángulo con la Superficie', value: `${angleDeg.toFixed(1)}°` },
           { label: 'Ángulo con la Normal', value: `${(90 - angleDeg).toFixed(1)}°` },
@@ -3932,6 +4072,8 @@ export class MeasurementTool {
         id: 'measure-main',
         worldPos: cylData.center.clone(),
         text: `∠ ${angleDeg.toFixed(1)}°`,
+        targetFaces: [faceData],
+        targetCylinders: [cylData],
         screenX: 0,
         screenY: 0,
         visible: false
@@ -4019,6 +4161,7 @@ export class MeasurementTool {
           id: 'measure-main',
           worldPos: mid.clone(),
           text: `⟂ ${perpDist.toFixed(2)} mm`,
+          targetEdges: [edge1, edge2],
           screenX: 0,
           screenY: 0,
           visible: false
@@ -4028,6 +4171,7 @@ export class MeasurementTool {
           id: 'measure-main',
           worldPos: edge1.midpoint.clone(),
           text: `Colineales (0.00 mm)`,
+          targetEdges: [edge1, edge2],
           screenX: 0,
           screenY: 0,
           visible: false
@@ -4091,6 +4235,7 @@ export class MeasurementTool {
         id: 'measure-main',
         worldPos: mid.clone(),
         text: `∠ ${angleDeg.toFixed(1)}°${res.dist > 0.1 ? ` | ${res.dist.toFixed(2)} mm` : ''}`,
+        targetEdges: [edge1, edge2],
         screenX: 0,
         screenY: 0,
         visible: false
@@ -4571,6 +4716,7 @@ export class MeasurementTool {
       this.applySectionClipping(this.savedGroup);
     }
     this.updatePlanesDynamicAnchors();
+    this.update();
   }
 
   /**
@@ -5521,9 +5667,10 @@ export class MeasurementTool {
 
       // CAD Faces: If ANY measured face is COMPLETELY cut away, hide measurement.
       // But as long as every measured face has at least one visible part, it remains visible!
-      if (entry.targetFaces && entry.targetFaces.length > 0) {
-        for (let i = 0; i < entry.targetFaces.length; i++) {
-          const face = entry.targetFaces[i];
+      const faces = entry.targetFaces || (entry.faceData ? [entry.faceData] : (entry.face1 || entry.face2 ? [entry.face1, entry.face2].filter(Boolean) : null));
+      if (faces && faces.length > 0) {
+        for (let i = 0; i < faces.length; i++) {
+          const face = faces[i];
           if (!this.isFaceVisibleUnderPlane(face, plane)) {
             return false;
           }
@@ -5531,9 +5678,10 @@ export class MeasurementTool {
       }
 
       // CAD Edges: If ANY measured edge is COMPLETELY cut away, hide measurement.
-      if (entry.targetEdges && entry.targetEdges.length > 0) {
-        for (let i = 0; i < entry.targetEdges.length; i++) {
-          const edge = entry.targetEdges[i];
+      const edges = entry.targetEdges || (entry.edgeData ? [entry.edgeData] : (entry.edge1 || entry.edge2 ? [entry.edge1, entry.edge2].filter(Boolean) : null));
+      if (edges && edges.length > 0) {
+        for (let i = 0; i < edges.length; i++) {
+          const edge = edges[i];
           if (!this.isEdgeVisibleUnderPlane(edge, plane)) {
             return false;
           }
@@ -5541,9 +5689,10 @@ export class MeasurementTool {
       }
 
       // CAD Cylinders: If ANY measured cylinder is COMPLETELY cut away, hide measurement.
-      if (entry.targetCylinders && entry.targetCylinders.length > 0) {
-        for (let i = 0; i < entry.targetCylinders.length; i++) {
-          const cyl = entry.targetCylinders[i];
+      const cylinders = entry.targetCylinders || (entry.cylData ? [entry.cylData] : (entry.cyl1 || entry.cyl2 ? [entry.cyl1, entry.cyl2].filter(Boolean) : null));
+      if (cylinders && cylinders.length > 0) {
+        for (let i = 0; i < cylinders.length; i++) {
+          const cyl = cylinders[i];
           if (!this.isCylinderVisibleUnderPlane(cyl, plane)) {
             return false;
           }
@@ -5552,13 +5701,13 @@ export class MeasurementTool {
 
       // Pure entity measurements (face-face, edge-edge, cyl-cyl, edge-face, etc.) do NOT
       // check discrete targetPoints because the dimension dynamically anchors to the visible slice.
-      const isEntityToEntity = (entry.targetFaces && entry.targetFaces.length >= 2) ||
-                               (entry.targetEdges && entry.targetEdges.length >= 2) ||
-                               (entry.targetCylinders && entry.targetCylinders.length >= 2) ||
-                               (entry.targetFaces && entry.targetEdges && entry.targetFaces.length > 0 && entry.targetEdges.length > 0) ||
-                               (entry.targetFaces && entry.targetCylinders && entry.targetFaces.length > 0 && entry.targetCylinders.length > 0) ||
-                               (entry.targetEdges && entry.targetCylinders && entry.targetEdges.length > 0 && entry.targetCylinders.length > 0) ||
-                               (entry.type === 'planes' || entry.type === 'planes_angle' || entry.type === 'lines_parallel' || entry.type === 'lines_angle' || entry.type === 'cylinders_distance' || entry.type === 'cylinder_single' || entry.type === 'edge_single' || entry.type === 'edge_cut_single');
+      const isEntityToEntity = (entry.type === 'planes' || entry.type === 'planes_angle' ||
+                                entry.type === 'lines_parallel' || entry.type === 'lines_angle' ||
+                                entry.type === 'cylinders_distance' || entry.type === 'cylinder_single' ||
+                                entry.type === 'edge_single' || entry.type === 'edge_cut_single' ||
+                                entry.type === 'line_plane' || entry.type === 'line_plane_angle' ||
+                                entry.type === 'line_cylinder' ||
+                                entry.type === 'plane_cylinder_distance' || entry.type === 'plane_cylinder_angle');
 
       if (!isEntityToEntity) {
         const points = entry.targetPoints;
@@ -5665,13 +5814,56 @@ export class MeasurementTool {
 
       let canShow = badge.measureVisible !== false;
 
-      // Check if badge anchor itself is clipped away by cutting plane (only for badges without target CAD entities)
+      // Check if badge anchor or its target CAD entities are clipped away by cutting plane
       if (canShow && this.viewer && this.viewer.sectionActive && this.viewer.sectionPlane) {
+        const plane = this.viewer.sectionPlane;
+
+        // 1. If badge is attached to cylinders, verify all cylinders are at least partially visible
+        if (badge.targetCylinders && badge.targetCylinders.length > 0) {
+          for (let c = 0; c < badge.targetCylinders.length; c++) {
+            if (!this.isCylinderVisibleUnderPlane(badge.targetCylinders[c], plane)) {
+              canShow = false;
+              break;
+            }
+          }
+        }
+
+        // 2. If badge is attached to faces, verify all faces are at least partially visible
+        if (canShow && badge.targetFaces && badge.targetFaces.length > 0) {
+          for (let f = 0; f < badge.targetFaces.length; f++) {
+            if (!this.isFaceVisibleUnderPlane(badge.targetFaces[f], plane)) {
+              canShow = false;
+              break;
+            }
+          }
+        }
+
+        // 3. If badge is attached to edges, verify all edges are at least partially visible
+        if (canShow && badge.targetEdges && badge.targetEdges.length > 0) {
+          for (let e = 0; e < badge.targetEdges.length; e++) {
+            if (!this.isEdgeVisibleUnderPlane(badge.targetEdges[e], plane)) {
+              canShow = false;
+              break;
+            }
+          }
+        }
+
+        // 4. If badge has discrete target points, verify they are in front of plane
+        if (canShow && badge.targetPoints && badge.targetPoints.length > 0) {
+          for (let p = 0; p < badge.targetPoints.length; p++) {
+            if (badge.targetPoints[p] && plane.distanceToPoint(badge.targetPoints[p]) < -0.005) {
+              canShow = false;
+              break;
+            }
+          }
+        }
+
+        // 5. Fallback for badges without CAD entities (pure points or custom positions)
         const hasEntities = (badge.targetFaces && badge.targetFaces.length > 0) ||
                             (badge.targetEdges && badge.targetEdges.length > 0) ||
                             (badge.targetCylinders && badge.targetCylinders.length > 0);
-        if (!hasEntities) {
-          if (this.viewer.sectionPlane.distanceToPoint(badge.worldPos) < -0.005) {
+        if (canShow && !hasEntities) {
+          if (plane.distanceToPoint(badge.worldPos) < -0.005) {
             canShow = false;
           }
         }
