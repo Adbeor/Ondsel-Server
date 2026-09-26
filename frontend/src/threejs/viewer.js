@@ -2460,7 +2460,7 @@ export class Viewer {
         const pts2D = pathPts.map(pt => ({ u: pt.dot(U), v: pt.dot(V) }));
         const fit = fitCircle2D(pts2D);
 
-        if (fit && fit.r >= 0.1 && fit.relError <= 0.04) {
+        if (fit && fit.r >= 0.1 && fit.relError <= 0.035 && fit.maxResidual <= Math.max(0.35, fit.r * 0.02)) {
           const polarAngles = pts2D.map(pt => Math.atan2(pt.v - fit.vc, pt.u - fit.uc)).sort((a, b) => a - b);
           let maxGap = 0;
           for (let i = 0; i < polarAngles.length; i++) {
@@ -2472,16 +2472,16 @@ export class Viewer {
           const maxGapDeg = maxGap * (180 / Math.PI);
 
           let isValidCircle = false;
-          if (isClosed && maxGapDeg <= 55.0) {
+          if (isClosed && maxGapDeg <= 50.0 && fit.relError <= 0.025) {
             isValidCircle = true;
-          } else if (!isClosed) {
+          } else if (!isClosed && fit.relError <= 0.015 && fit.maxResidual <= Math.max(0.15, fit.r * 0.01)) {
             let maxInnerGap = 0;
             for (let i = 0; i < polarAngles.length - 1; i++) {
               const g = polarAngles[i + 1] - polarAngles[i];
               if (g > maxInnerGap) maxInnerGap = g;
             }
             const totalSpanDeg = (polarAngles[polarAngles.length - 1] - polarAngles[0]) * (180 / Math.PI);
-            if (maxInnerGap * (180 / Math.PI) <= 45.0 && totalSpanDeg >= 45.0) {
+            if (maxInnerGap * (180 / Math.PI) <= 30.0 && totalSpanDeg >= 90.0) {
               isValidCircle = true;
             }
           }

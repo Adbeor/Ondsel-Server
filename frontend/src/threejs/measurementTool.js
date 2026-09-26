@@ -413,31 +413,40 @@ export function findVisibleCylinderAnchor(cylData, plane) {
   const defaultPt = cylData.topCenter || cylData.rimCenter || cylData.center || cylData.hitPoint;
   if (!plane) return defaultPt;
 
-  // 1. If default point is visible, use it
+  // 1. If default point (topCenter/rimCenter) is visible, use it
   if (defaultPt && plane.distanceToPoint(defaultPt) >= -0.005) {
     return defaultPt;
   }
 
-  // 2. If cylinder axis intersects section plane between bottom and top:
+  // 2. If bottomCenter is visible, use it
+  if (cylData.bottomCenter && plane.distanceToPoint(cylData.bottomCenter) >= -0.005) {
+    return cylData.bottomCenter;
+  }
+
+  // 3. If plane cuts transversely (perpendicular to axis), check cut center Pcut on axis
   if (cylData.axis && (cylData.topCenter || cylData.center)) {
-    const P0 = cylData.center || cylData.topCenter;
     const denom = plane.normal.dot(cylData.axis);
-    if (Math.abs(denom) > 1e-4) {
+    if (Math.abs(denom) >= 0.98) {
+      const P0 = cylData.center || cylData.topCenter;
       const t = -(plane.normal.dot(P0) + plane.constant) / denom;
       const Pcut = P0.clone().addScaledVector(cylData.axis, t);
       const maxSpan = (cylData.depth > 0.05 ? cylData.depth * 0.6 : cylData.radius * 2);
-      if (Pcut.distanceTo(P0) <= maxSpan * 1.5) {
+      if (Pcut.distanceTo(P0) <= maxSpan * 1.5 && plane.distanceToPoint(Pcut) >= -0.005) {
         return Pcut;
       }
     }
   }
 
-  // 3. If bottomCenter is visible, use it
-  if (cylData.bottomCenter && plane.distanceToPoint(cylData.bottomCenter) >= -0.005) {
-    return cylData.bottomCenter;
+  // 4. If cylinder axis passes through visible half-space, find point on axis closest to hitPoint
+  if (cylData.axis && (cylData.center || cylData.topCenter) && cylData.hitPoint) {
+    const P0 = cylData.center || cylData.topCenter;
+    const projAxis = P0.clone().addScaledVector(cylData.axis, cylData.hitPoint.clone().sub(P0).dot(cylData.axis));
+    if (plane.distanceToPoint(projAxis) >= -0.005) {
+      return projAxis;
+    }
   }
 
-  // 4. Fallback to hitPoint if visible
+  // 5. Fallback to hitPoint if visible (e.g. for badge leader line when axis itself is clipped)
   if (cylData.hitPoint && plane.distanceToPoint(cylData.hitPoint) >= -0.005) {
     return cylData.hitPoint;
   }
@@ -1115,6 +1124,15 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
   const { triangles, edgeToTriangles, vKeyToPos, creaseAdjacency, creaseEdgeSet, planarTrianglesSet, pos } = topology;
   if (seedTriangleIndex < 0 || seedTriangleIndex >= triangles.length) return null;
 
+  // STRICT PLANAR EXCLUSION:
+  // If the clicked seed triangle belongs to a multi-triangle flat planar face,
+  // it is definitively a planar surface (face/shoulder/cap), NOT a cylinder wall!
+  // In CAD, clicking a planar face must select the planar face (extractCADPlanarFace),
+  // NEVER hijack it into an adjacent cylinder.
+  if (planarTrianglesSet && planarTrianglesSet.has(seedTriangleIndex)) {
+    return null;
+  }
+
   const seedTri = triangles[seedTriangleIndex];
   const normalMatrix = new THREE.Matrix3().getNormalMatrix(mesh.matrixWorld);
   const tempV = new THREE.Vector3();
@@ -1394,7 +1412,11 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
         chainEdges.add(ka < kb ? `${ka}#${kb}` : `${kb}#${ka}`);
       }
       const seedTouchesRim = seedTri.edges.some(ek => chainEdges.has(ek));
-      if (visitedCyl.size > 0 && !visitedCyl.has(seedTriangleIndex) && !seedTouchesRim) {
+      if (visitedCyl.size > 0) {
+        if (!visitedCyl.has(seedTriangleIndex)) {
+          continue;
+        }
+      } else if (!seedTouchesRim) {
         continue;
       }
 
@@ -1461,11 +1483,6 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
       hitPoint: hitPoint ? hitPoint.clone() : centerWorld.clone(),
       method: 'rim'
     };
-  }
-
-  // If seed triangle belongs to a multi-triangle flat planar face, do NOT treat as cylinder wall!
-  if (planarTrianglesSet && planarTrianglesSet.has(seedTriangleIndex)) {
-    return null;
   }
 
   // 2. SECONDARY: Direct Cylinder Wall Detection
@@ -4595,62 +4612,90 @@ export class MeasurementTool {
     };
 
     const plane = (this.viewer && this.viewer.sectionActive) ? this.viewer.sectionPlane : null;
-    let topCenter = cylData.topCenter || cylData.rimCenter || cylData.center;
-    if (plane && topCenter && plane.distanceToPoint(topCenter) < -0.005) {
-      const visibleAnchor = this.findVisibleCylinderAnchor(cylData, plane);
-      if (visibleAnchor) topCenter = visibleAnchor;
-    }
+    const topCenter = cylData.topCenter || cylData.rimCenter || cylData.center;
     const bottomCenter = cylData.bottomCenter || cylData.otherRimCenter;
 
     if (topCenter) {
       group.add(createRing(topCenter, true));
     }
 
-    // Second circular ring at opposite rim if cylinder has depth and rim is visible
+    // Second circular ring at opposite rim if cylinder has depth
     if (bottomCenter && cylData.depth > 0.5) {
-      if (!plane || plane.distanceToPoint(bottomCenter) >= -0.005) {
-        group.add(createRing(bottomCenter, false));
+      group.add(createRing(bottomCenter, false));
+    }
+
+    // Transverse section cut ring (only if section plane cuts strictly perpendicular to cylinder axis)
+    if (plane && cylData.axis && (cylData.topCenter || cylData.center) && cylData.depth > 0.5) {
+      const denom = plane.normal.dot(cylData.axis);
+      if (Math.abs(denom) >= 0.98) {
+        const P0 = cylData.center || cylData.topCenter;
+        const t = -(plane.normal.dot(P0) + plane.constant) / denom;
+        const Pcut = P0.clone().addScaledVector(cylData.axis, t);
+        const h0 = P0.dot(cylData.axis);
+        const hCut = Pcut.dot(cylData.axis);
+        const halfDepth = cylData.depth * 0.5;
+        if (Math.abs(hCut - h0) <= halfDepth + 0.05) {
+          group.add(createRing(Pcut, false));
+        }
       }
     }
 
     // 3. Central click pin, crosshairs, and axis line (only for locked selections, not hover)
     if (!isHover) {
-      const center = topCenter;
-      // Center marker
-      const pinGeom = new THREE.SphereGeometry(1.0, 16, 16);
-      const pinMat = new THREE.MeshBasicMaterial({
-        color: colorHex,
-        depthTest: !this.xray,
-        depthWrite: false,
-        polygonOffset: true,
-        polygonOffsetFactor: -4,
-        polygonOffsetUnits: -4
-      });
-      const pin = new THREE.Mesh(pinGeom, pinMat);
-      pin.position.copy(center);
-      pin.renderOrder = 3020;
-      pin.userData.adaptive = {
-        type: 'sphere',
-        worldPoint: center.clone(),
-        featureLength: cylData.radius * 2,
-        targetPixels: 3.5,
-        maxRatio: 0.06,
-        minWorld: 0.03,
-        maxWorld: 1.5,
-        baseRadius: 1.0
-      };
-      this.updateAdaptiveMesh(pin);
-      group.add(pin);
-
-      // Center crosshairs along U and V (subtle visible rods scaled with radius)
       const chRodR = Math.max(0.3, Math.min(0.6, cylData.radius * 0.02));
-      const chLen = cylData.radius * 0.85;
-      const u1 = center.clone().addScaledVector(cylData.U, -chLen);
-      const u2 = center.clone().addScaledVector(cylData.U, chLen);
-      const v1 = center.clone().addScaledVector(cylData.V, -chLen);
-      const v2 = center.clone().addScaledVector(cylData.V, chLen);
-      group.add(createThickLineMesh(u1, u2, chRodR, colorHex, !this.xray));
-      group.add(createThickLineMesh(v1, v2, chRodR, colorHex, !this.xray));
+      // Pin and crosshairs MUST be centered on the cylinder axis, NEVER on the wall!
+      let center = topCenter;
+      if (plane && center && plane.distanceToPoint(center) < -0.005) {
+        if (bottomCenter && plane.distanceToPoint(bottomCenter) >= -0.005) {
+          center = bottomCenter;
+        } else if (cylData.center && plane.distanceToPoint(cylData.center) >= -0.005) {
+          center = cylData.center;
+        } else if (cylData.axis && (cylData.topCenter || cylData.center) && cylData.hitPoint) {
+          const P0 = cylData.center || cylData.topCenter;
+          const projAxis = P0.clone().addScaledVector(cylData.axis, cylData.hitPoint.clone().sub(P0).dot(cylData.axis));
+          if (plane.distanceToPoint(projAxis) >= -0.005) {
+            center = projAxis;
+          }
+        }
+      }
+      if (!center) center = cylData.topCenter || cylData.center || cylData.bottomCenter;
+
+      if (center) {
+        // Center marker
+        const pinGeom = new THREE.SphereGeometry(1.0, 16, 16);
+        const pinMat = new THREE.MeshBasicMaterial({
+          color: colorHex,
+          depthTest: !this.xray,
+          depthWrite: false,
+          polygonOffset: true,
+          polygonOffsetFactor: -4,
+          polygonOffsetUnits: -4
+        });
+        const pin = new THREE.Mesh(pinGeom, pinMat);
+        pin.position.copy(center);
+        pin.renderOrder = 3020;
+        pin.userData.adaptive = {
+          type: 'sphere',
+          worldPoint: center.clone(),
+          featureLength: cylData.radius * 2,
+          targetPixels: 3.5,
+          maxRatio: 0.06,
+          minWorld: 0.03,
+          maxWorld: 1.5,
+          baseRadius: 1.0
+        };
+        this.updateAdaptiveMesh(pin);
+        group.add(pin);
+
+        // Center crosshairs along U and V (subtle visible rods scaled with radius)
+        const chLen = cylData.radius * 0.85;
+        const u1 = center.clone().addScaledVector(cylData.U, -chLen);
+        const u2 = center.clone().addScaledVector(cylData.U, chLen);
+        const v1 = center.clone().addScaledVector(cylData.V, -chLen);
+        const v2 = center.clone().addScaledVector(cylData.V, chLen);
+        group.add(createThickLineMesh(u1, u2, chRodR, colorHex, !this.xray));
+        group.add(createThickLineMesh(v1, v2, chRodR, colorHex, !this.xray));
+      }
 
       // Central Axis line (extending through the hole)
       if (cylData.bottomCenter && cylData.topCenter && !cylData.isCutCircle && cylData.depth > 0.5) {
