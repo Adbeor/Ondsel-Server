@@ -27,7 +27,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       >
         <v-icon :color="sectionActive ? undefined : 'on-surface'">mdi-vector-intersection</v-icon>
         <v-tooltip activator="parent" location="top">
-          {{ !sectionActive ? 'Activar análisis de sección (Cortes 3D)' : (sectionPanelOpen ? 'Ocultar panel de corte' : 'Abrir controles de corte (Corte activo)') }}
+          {{ !sectionActive ? 'Activate section analysis (3D Cross-Sections)' : (sectionPanelOpen ? 'Hide section panel' : 'Open section controls (Active cut)') }}
         </v-tooltip>
       </v-btn>
 
@@ -52,7 +52,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               {{ navigationStyle === 'touchpad' ? 'mdi-laptop' : (navigationStyle === 'cad' ? 'mdi-cube-outline' : (navigationStyle === 'blender' ? 'mdi-blender-software' : 'mdi-axis-arrow')) }}
             </v-icon>
             <v-tooltip activator="parent" location="top">
-              Navegación 3D: {{ navStyleTitle }} (clic para cambiar estilo)
+              3D Navigation: {{ navStyleTitle }} (click to change style)
             </v-tooltip>
           </v-btn>
         </template>
@@ -61,12 +61,12 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           <div class="px-3 pt-2 pb-1 d-flex align-center justify-space-between">
             <div class="d-flex align-center">
               <v-icon size="small" class="mr-2" color="primary">mdi-cursor-move</v-icon>
-              <span class="text-subtitle-2 font-weight-bold">Estilo de Navegación 3D</span>
+              <span class="text-subtitle-2 font-weight-bold">3D Navigation Style</span>
             </div>
             <v-btn icon="mdi-close" variant="text" size="x-small" @click="navMenuOpen = false" />
           </div>
           <div class="px-3 pb-2 text-caption text-medium-emphasis">
-            Selecciona el modo de control de cámara (estilo FreeCAD)
+            Select camera navigation mode (FreeCAD style)
           </div>
 
           <v-divider class="mb-1" />
@@ -85,16 +85,16 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               </template>
               <v-list-item-title class="font-weight-bold text-body-2 d-flex align-center justify-space-between">
                 <span>Touchpad (FreeCAD)</span>
-                <v-chip size="x-small" color="primary" variant="tonal" class="ml-2 font-weight-bold">Recomendado</v-chip>
+                <v-chip size="x-small" color="primary" variant="tonal" class="ml-2 font-weight-bold">Recommended</v-chip>
               </v-list-item-title>
               <v-list-item-subtitle class="text-caption mt-1" style="line-height: 1.35; white-space: normal;">
-                <span class="font-weight-medium text-primary">Shift + Arrastrar:</span> Desplazar (Pan)<br/>
-                <span class="font-weight-medium text-primary">Alt + Arrastrar:</span> Girar (Rotar)<br/>
-                <span class="text-medium-emphasis">Rueda: Zoom | Clic: Seleccionar / Medir</span>
+                <span class="font-weight-medium text-primary">Shift + Drag:</span> Pan<br/>
+                <span class="font-weight-medium text-primary">Alt + Drag:</span> Orbit (Rotate)<br/>
+                <span class="text-medium-emphasis">Wheel: Zoom | Click: Select / Measure</span>
               </v-list-item-subtitle>
             </v-list-item>
 
-            <!-- 2. Estándar (Three.js) -->
+            <!-- 2. Standard (Three.js) -->
             <v-list-item
               :active="navigationStyle === 'orbit'"
               color="primary"
@@ -106,12 +106,12 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 <v-icon :color="navigationStyle === 'orbit' ? 'primary' : undefined">mdi-axis-arrow</v-icon>
               </template>
               <v-list-item-title class="font-weight-medium text-body-2">
-                Estándar / Órbita (Three.js)
+                Standard / Orbit (Three.js)
               </v-list-item-title>
               <v-list-item-subtitle class="text-caption mt-1" style="line-height: 1.35; white-space: normal;">
-                <span class="font-weight-medium">Arrastrar izquierdo:</span> Girar<br/>
-                <span class="font-weight-medium">Shift o Arrastrar der.:</span> Desplazar (Pan)<br/>
-                <span class="text-medium-emphasis">Rueda: Zoom | Clic: Seleccionar</span>
+                <span class="font-weight-medium">Left Drag:</span> Orbit (Rotate)<br/>
+                <span class="font-weight-medium">Shift or Right Drag:</span> Pan<br/>
+                <span class="text-medium-emphasis">Wheel: Zoom | Click: Select</span>
               </v-list-item-subtitle>
             </v-list-item>
 
@@ -130,9 +130,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 CAD (FreeCAD / OpenCASCADE)
               </v-list-item-title>
               <v-list-item-subtitle class="text-caption mt-1" style="line-height: 1.35; white-space: normal;">
-                <span class="font-weight-medium">Botón central:</span> Desplazar (Pan)<br/>
-                <span class="font-weight-medium">Central + Clic Izq:</span> Girar (Rotar)<br/>
-                <span class="text-medium-emphasis">Rueda: Zoom | Clic Izq: Seleccionar</span>
+                <span class="font-weight-medium">Middle Button:</span> Pan<br/>
+                <span class="font-weight-medium">Middle + Left Click:</span> Orbit (Rotate)<br/>
+                <span class="text-medium-emphasis">Wheel: Zoom | Left Click: Select</span>
               </v-list-item-subtitle>
             </v-list-item>
 
@@ -150,9 +150,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 Blender
               </v-list-item-title>
               <v-list-item-subtitle class="text-caption mt-1" style="line-height: 1.35; white-space: normal;">
-                <span class="font-weight-medium">Botón central:</span> Girar (Rotar)<br/>
-                <span class="font-weight-medium">Shift + Central:</span> Desplazar (Pan)<br/>
-                <span class="text-medium-emphasis">Rueda: Zoom | Clic Izq: Seleccionar</span>
+                <span class="font-weight-medium">Middle Button:</span> Orbit (Rotate)<br/>
+                <span class="font-weight-medium">Shift + Middle:</span> Pan<br/>
+                <span class="text-medium-emphasis">Wheel: Zoom | Left Click: Select</span>
               </v-list-item-subtitle>
             </v-list-item>
           </v-list>
@@ -171,7 +171,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       >
         <v-icon :color="measureActive ? undefined : 'on-surface'">mdi-ruler-square</v-icon>
         <v-tooltip activator="parent" location="top">
-          {{ !measureActive ? 'Herramienta de medición CAD (Planos, Radios, Líneas)' : (measurePanelOpen ? 'Ocultar panel de medición' : 'Abrir panel de medición (Activo)') }}
+          {{ !measureActive ? 'CAD measurement tool (Planes, Radii, Edges)' : (measurePanelOpen ? 'Hide measurement panel' : 'Open measurement panel (Active)') }}
         </v-tooltip>
       </v-btn>
     </div>
@@ -253,7 +253,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             style="width: 18px; height: 18px; min-width: 18px; margin-right: -4px;"
             @click.stop="deleteMeasurement(badge.measureId || badge.id)"
             @pointerdown.stop
-            title="Eliminar esta cota"
+            title="Delete this dimension"
           >
             <v-icon size="12">mdi-close</v-icon>
           </v-btn>
@@ -261,7 +261,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       </div>
     </div>
 
-    <!-- Floating Persistent Cotas Indicator (visible when tool panel is closed but cotas exist) -->
+    <!-- Floating Persistent Dimensions Indicator (visible when tool panel is closed but dimensions exist) -->
     <v-chip
       v-if="!measureActive && visibleMeasurementBadges && visibleMeasurementBadges.length > 0"
       color="primary"
@@ -272,14 +272,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       style="position: absolute; bottom: 84px; left: 24px; z-index: 10; backdrop-filter: blur(8px);"
     >
       <v-icon start size="small">mdi-ruler</v-icon>
-      {{ visibleMeasurementBadges.length }} {{ visibleMeasurementBadges.length === 1 ? 'cota en pantalla' : 'cotas en pantalla' }}
+      {{ visibleMeasurementBadges.length }} {{ visibleMeasurementBadges.length === 1 ? 'dimension on screen' : 'dimensions on screen' }}
       <v-btn
         variant="text"
         size="x-small"
         class="ml-1 font-weight-bold text-caption text-decoration-underline"
         @click.stop="clearAllMeasurements"
       >
-        Limpiar
+        Clear
       </v-btn>
       <v-btn
         variant="text"
@@ -287,7 +287,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         class="ml-1 font-weight-bold text-caption text-decoration-underline"
         @click.stop="toggleMeasurement"
       >
-        Medir más
+        Measure more
       </v-btn>
     </v-chip>
 
@@ -310,11 +310,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             <div class="d-flex align-center drag-title-area text-truncate" style="min-width: 0; flex: 1;">
               <v-icon size="18" color="medium-emphasis" class="mr-1 flex-shrink-0 drag-handle-icon">
                 mdi-drag-vertical
-                <v-tooltip activator="parent" location="top">Arrastrar para mover panel • Doble clic para restablecer</v-tooltip>
+                <v-tooltip activator="parent" location="top">Drag to move panel • Double-click to reset</v-tooltip>
               </v-icon>
               <v-icon color="primary" class="mr-1 flex-shrink-0">mdi-vector-intersection</v-icon>
-              <span v-if="!sectionPanelCollapsed" class="status-indicator-dot mr-2" title="Herramienta activa"></span>
-              <span class="text-subtitle-2 font-weight-bold text-truncate">{{ minimalistMode ? 'Sección' : 'Análisis de Sección' }}</span>
+              <span v-if="!sectionPanelCollapsed" class="status-indicator-dot mr-2" title="Active tool"></span>
+              <span class="text-subtitle-2 font-weight-bold text-truncate">{{ minimalistMode ? 'Section' : 'Section Analysis' }}</span>
               <v-chip v-if="sectionPanelCollapsed" size="x-small" color="primary" class="ml-2 font-weight-bold flex-shrink-0" variant="flat">
                 {{ sectionAxis.toUpperCase() }}: {{ (sectionOffset || 0).toFixed(1) }} mm
               </v-chip>
@@ -329,7 +329,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               >
                 <v-icon size="16">{{ minimalistMode ? 'mdi-unfold-more-horizontal' : 'mdi-unfold-less-horizontal' }}</v-icon>
                 <v-tooltip activator="parent" location="top">
-                  {{ minimalistMode ? 'Modo minimalista activo (mostrar opciones avanzadas)' : 'Activar modo minimalista (solo lo esencial)' }}
+                  {{ minimalistMode ? 'Minimalist mode active (show advanced options)' : 'Activate minimalist mode (essential only)' }}
                 </v-tooltip>
               </v-btn>
               <v-btn
@@ -340,7 +340,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               >
                 <v-icon size="16">{{ sectionPanelCollapsed ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
                 <v-tooltip activator="parent" location="top">
-                  {{ sectionPanelCollapsed ? 'Expandir panel de corte' : 'Minimizar panel de corte' }}
+                  {{ sectionPanelCollapsed ? 'Expand section panel' : 'Collapse section panel' }}
                 </v-tooltip>
               </v-btn>
               <div class="panel-header-divider"></div>
@@ -352,7 +352,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 @click="deactivateSection"
               >
                 <v-icon size="16">mdi-power</v-icon>
-                <v-tooltip activator="parent" location="top">Desactivar y quitar corte</v-tooltip>
+                <v-tooltip activator="parent" location="top">Deactivate and remove cut</v-tooltip>
               </v-btn>
               <v-btn
                 icon
@@ -361,7 +361,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 @click="closePanel"
               >
                 <v-icon size="16">mdi-close</v-icon>
-                <v-tooltip activator="parent" location="top">Ocultar panel (el corte queda permanente)</v-tooltip>
+                <v-tooltip activator="parent" location="top">Hide panel (cut remains active)</v-tooltip>
               </v-btn>
             </div>
           </div>
@@ -370,7 +370,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         <v-expand-transition>
           <div v-show="!sectionPanelCollapsed">
             <v-card-text class="pt-2 pb-3">
-              <!-- VISTA MINIMALISTA: solo eje, slider y botones principales -->
+              <!-- MINIMALIST VIEW: axis toggle, slider and primary actions only -->
               <template v-if="minimalistMode">
                 <v-btn-toggle
                   v-model="sectionAxis"
@@ -380,13 +380,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                   class="w-100 mb-2"
                   @update:model-value="onAxisChange"
                 >
-                  <v-btn value="x" class="flex-grow-1" size="small">Plano X</v-btn>
-                  <v-btn value="y" class="flex-grow-1" size="small">Plano Y</v-btn>
-                  <v-btn value="z" class="flex-grow-1" size="small">Plano Z</v-btn>
+                  <v-btn value="x" class="flex-grow-1" size="small">Plane X</v-btn>
+                  <v-btn value="y" class="flex-grow-1" size="small">Plane Y</v-btn>
+                  <v-btn value="z" class="flex-grow-1" size="small">Plane Z</v-btn>
                 </v-btn-toggle>
 
                 <div class="d-flex align-center justify-space-between mb-1">
-                  <span class="text-caption font-weight-medium text-medium-emphasis">Desplazamiento</span>
+                  <span class="text-caption font-weight-medium text-medium-emphasis">Offset</span>
                   <v-chip size="x-small" color="primary" variant="flat" class="font-weight-bold font-monospace">
                     {{ Number(sectionOffset).toFixed(1) }} mm
                   </v-chip>
@@ -411,7 +411,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                     prepend-icon="mdi-swap-horizontal"
                     @click="toggleInvert"
                   >
-                    Invertir
+                    Invert
                   </v-btn>
                   <v-btn
                     size="x-small"
@@ -419,7 +419,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                     prepend-icon="mdi-restart"
                     @click="resetToCenter"
                   >
-                    Centrar
+                    Center
                   </v-btn>
                   <v-btn
                     size="x-small"
@@ -428,15 +428,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                     prepend-icon="mdi-tune"
                     @click="toggleMinimalistMode"
                   >
-                    + Ajustes
+                    + Settings
                   </v-btn>
                 </div>
               </template>
 
-              <!-- VISTA COMPLETA: todos los controles avanzados -->
+              <!-- FULL VIEW: all advanced cutting controls -->
               <template v-else>
-                <!-- Eje de corte -->
-          <div class="text-caption font-weight-bold text-medium-emphasis mb-1">PLANO DE CORTE</div>
+                <!-- Cutting plane axis -->
+          <div class="text-caption font-weight-bold text-medium-emphasis mb-1">CUTTING PLANE</div>
           <v-btn-toggle
             v-model="sectionAxis"
             mandatory
@@ -445,14 +445,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             class="w-100 mb-3"
             @update:model-value="onAxisChange"
           >
-            <v-btn value="x" class="flex-grow-1" size="small">Plano X</v-btn>
-            <v-btn value="y" class="flex-grow-1" size="small">Plano Y</v-btn>
-            <v-btn value="z" class="flex-grow-1" size="small">Plano Z</v-btn>
+            <v-btn value="x" class="flex-grow-1" size="small">Plane X</v-btn>
+            <v-btn value="y" class="flex-grow-1" size="small">Plane Y</v-btn>
+            <v-btn value="z" class="flex-grow-1" size="small">Plane Z</v-btn>
           </v-btn-toggle>
 
-          <!-- Slider de posición -->
+          <!-- Position slider -->
           <div class="d-flex justify-space-between align-center mb-1">
-            <span class="text-caption font-weight-bold text-medium-emphasis">DESPLAZAMIENTO</span>
+            <span class="text-caption font-weight-bold text-medium-emphasis">OFFSET</span>
             <v-chip size="x-small" color="primary" variant="flat">
               {{ Number(sectionOffset).toFixed(1) }} mm
             </v-chip>
@@ -469,7 +469,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             @update:model-value="onOffsetChange"
           ></v-slider>
 
-          <!-- Acciones Invertir / Centrar -->
+          <!-- Invert / Center actions -->
           <div class="d-flex justify-space-between align-center mb-2">
             <v-btn
               size="small"
@@ -478,7 +478,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               prepend-icon="mdi-swap-horizontal"
               @click="toggleInvert"
             >
-              Invertir corte
+              Invert cut
             </v-btn>
             <v-btn
               size="small"
@@ -486,16 +486,16 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               prepend-icon="mdi-restart"
               @click="resetToCenter"
             >
-              Centrar
+              Center
             </v-btn>
           </div>
 
-          <!-- Rayado de corte técnico (Hatch) -->
+          <!-- Technical cross-section hatch -->
           <v-divider class="my-2"></v-divider>
 
           <v-checkbox
             v-model="sectionShowHatch"
-            label="Rayado de corte (Hatch)"
+            label="Cross-section hatch"
             density="compact"
             hide-details
             color="primary"
@@ -505,7 +505,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           <v-fade-transition>
             <div v-if="sectionShowHatch" class="mb-2 pl-1 pr-1">
               <div class="d-flex justify-space-between align-center my-1">
-                <span class="text-caption text-medium-emphasis">PATRÓN HATCH</span>
+                <span class="text-caption text-medium-emphasis">HATCH PATTERN</span>
                 <v-btn-toggle
                   v-model="sectionHatchStyle"
                   mandatory
@@ -514,14 +514,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                   @update:model-value="applySection"
                 >
                   <v-btn value="diagonal" size="x-small">45° ANSI</v-btn>
-                  <v-btn value="cross" size="x-small">Malla</v-btn>
-                  <v-btn value="solid" size="x-small">Liso</v-btn>
+                  <v-btn value="cross" size="x-small">Cross</v-btn>
+                  <v-btn value="solid" size="x-small">Solid</v-btn>
                 </v-btn-toggle>
               </div>
 
-              <!-- Tonalidad de corte: Pastel (por defecto) o Intenso -->
+              <!-- Color Palette: Pastel (default) or Vivid -->
               <div class="d-flex justify-space-between align-center my-1">
-                <span class="text-caption text-medium-emphasis">TONALIDAD</span>
+                <span class="text-caption text-medium-emphasis">TONALITY</span>
                 <v-btn-toggle
                   v-model="sectionPaletteMode"
                   mandatory
@@ -530,14 +530,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                   @update:model-value="applySection"
                 >
                   <v-btn value="pastel" size="x-small">Pastel</v-btn>
-                  <v-btn value="vivid" size="x-small">Intenso</v-btn>
+                  <v-btn value="vivid" size="x-small">Vivid</v-btn>
                 </v-btn-toggle>
               </div>
 
-              <!-- Slider de tamaño/espaciado de líneas de corte -->
+              <!-- Hatch line spacing / scale slider -->
               <div v-if="sectionHatchStyle !== 'solid'" class="mt-2">
                 <div class="d-flex justify-space-between align-center mb-1">
-                  <span class="text-caption text-medium-emphasis">TAMAÑO RAYADO</span>
+                  <span class="text-caption text-medium-emphasis">HATCH SCALE</span>
                   <span class="text-caption font-weight-bold">{{ Number(sectionHatchDensity).toFixed(1) }}x</span>
                 </div>
                 <v-slider
@@ -554,20 +554,20 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             </div>
           </v-fade-transition>
 
-          <!-- Guía visual 3D -->
+          <!-- 3D visual guide plane -->
           <v-checkbox
             v-model="sectionShowPlane"
-            label="Mostrar plano guía 3D"
+            label="Show 3D guide plane"
             density="compact"
             hide-details
             color="primary"
             @update:model-value="applySection"
           ></v-checkbox>
 
-          <!-- Manipulador 3D en pantalla (Gizmo) -->
+          <!-- On-screen 3D manipulator (Gizmo) -->
           <v-checkbox
             v-model="sectionShowGizmo"
-            label="Manipulador 3D (Gizmo de corte)"
+            label="3D Gizmo (Cut manipulator)"
             density="compact"
             hide-details
             color="primary"
@@ -583,7 +583,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                     prepend-icon="mdi-unfold-less-horizontal"
                     @click="toggleMinimalistMode"
                   >
-                    Modo minimalista
+                    Minimalist mode
                   </v-btn>
                 </div>
               </template>
@@ -612,11 +612,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             <div class="d-flex align-center drag-title-area text-truncate" style="min-width: 0; flex: 1;">
               <v-icon size="18" color="medium-emphasis" class="mr-1 flex-shrink-0 drag-handle-icon">
                 mdi-drag-vertical
-                <v-tooltip activator="parent" location="top">Arrastrar para mover panel • Doble clic para restablecer</v-tooltip>
+                <v-tooltip activator="parent" location="top">Drag to move panel • Double-click to reset</v-tooltip>
               </v-icon>
               <v-icon color="primary" class="mr-1 flex-shrink-0">mdi-ruler-square</v-icon>
-              <span v-if="!measurePanelCollapsed" class="status-indicator-dot mr-2" title="Herramienta activa"></span>
-              <span class="text-subtitle-2 font-weight-bold text-truncate">{{ minimalistMode ? 'Medición' : 'Medición CAD' }}</span>
+              <span v-if="!measurePanelCollapsed" class="status-indicator-dot mr-2" title="Active tool"></span>
+              <span class="text-subtitle-2 font-weight-bold text-truncate">{{ minimalistMode ? 'Measure' : 'CAD Measurement' }}</span>
               <v-chip v-if="measurePanelCollapsed && currentMeasurement" size="x-small" color="primary" class="ml-2 font-weight-bold flex-shrink-0" variant="flat">
                 {{ currentMeasurement.primaryValue }}
               </v-chip>
@@ -631,7 +631,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               >
                 <v-icon size="16">{{ minimalistMode ? 'mdi-unfold-more-horizontal' : 'mdi-unfold-less-horizontal' }}</v-icon>
                 <v-tooltip activator="parent" location="top">
-                  {{ minimalistMode ? 'Modo minimalista activo (mostrar opciones completas)' : 'Activar modo minimalista (solo lo esencial)' }}
+                  {{ minimalistMode ? 'Minimalist mode active (show full options)' : 'Activate minimalist mode (essential only)' }}
                 </v-tooltip>
               </v-btn>
               <v-btn
@@ -642,7 +642,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               >
                 <v-icon size="16">{{ measurePanelCollapsed ? 'mdi-chevron-down' : 'mdi-chevron-up' }}</v-icon>
                 <v-tooltip activator="parent" location="top">
-                  {{ measurePanelCollapsed ? 'Expandir panel de medición' : 'Minimizar panel de medición' }}
+                  {{ measurePanelCollapsed ? 'Expand measurement panel' : 'Collapse measurement panel' }}
                 </v-tooltip>
               </v-btn>
               <v-btn
@@ -654,7 +654,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               >
                 <v-icon size="16">{{ measureXray ? 'mdi-eye-outline' : 'mdi-eye-off-outline' }}</v-icon>
                 <v-tooltip activator="parent" location="top">
-                  {{ measureXray ? 'Rayos X: Activo (visible a través de piezas)' : 'Oclusión 3D: Activa (oculto tras piezas sólidas)' }}
+                  {{ measureXray ? 'X-Ray: Active (visible through parts)' : '3D Occlusion: Active (hidden behind solid geometry)' }}
                 </v-tooltip>
               </v-btn>
               <v-btn
@@ -667,7 +667,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               >
                 <v-icon size="16">{{ copiedTarget === 'all' ? 'mdi-check' : 'mdi-clipboard-text-outline' }}</v-icon>
                 <v-tooltip activator="parent" location="top">
-                  {{ copiedTarget === 'all' ? '¡Informe copiado!' : 'Copiar informe completo' }}
+                  {{ copiedTarget === 'all' ? 'Report copied!' : 'Copy full report' }}
                 </v-tooltip>
               </v-btn>
               <div class="panel-header-divider"></div>
@@ -679,7 +679,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 @click="deactivateMeasurement"
               >
                 <v-icon size="16">mdi-power</v-icon>
-                <v-tooltip activator="parent" location="top">Cerrar y desactivar medición</v-tooltip>
+                <v-tooltip activator="parent" location="top">Close and deactivate measurement</v-tooltip>
               </v-btn>
               <v-btn
                 icon
@@ -688,7 +688,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 @click="measurePanelOpen = false"
               >
                 <v-icon size="16">mdi-close</v-icon>
-                <v-tooltip activator="parent" location="top">Ocultar panel (las cotas se mantienen)</v-tooltip>
+                <v-tooltip activator="parent" location="top">Hide panel (dimensions remain visible)</v-tooltip>
               </v-btn>
             </div>
           </div>
@@ -697,7 +697,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         <v-expand-transition>
           <div v-show="!measurePanelCollapsed">
             <v-card-text class="pt-2 pb-3">
-              <!-- VISTA MINIMALISTA: solo modo, valor principal y acción esencial -->
+              <!-- MINIMALIST VIEW: mode, primary value and essential action only -->
               <template v-if="minimalistMode">
                 <v-btn-toggle
                   v-model="measureMode"
@@ -708,13 +708,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                   @update:model-value="onMeasureModeChange"
                 >
                   <v-btn value="smart" class="flex-grow-1 px-1" size="x-small">Auto</v-btn>
-                  <v-btn value="planes" class="flex-grow-1 px-1" size="x-small">Planos</v-btn>
-                  <v-btn value="lines" class="flex-grow-1 px-1" size="x-small">Líneas</v-btn>
-                  <v-btn value="radius" class="flex-grow-1 px-1" size="x-small">Radio</v-btn>
+                  <v-btn value="planes" class="flex-grow-1 px-1" size="x-small">Planes</v-btn>
+                  <v-btn value="lines" class="flex-grow-1 px-1" size="x-small">Lines</v-btn>
+                  <v-btn value="radius" class="flex-grow-1 px-1" size="x-small">Radius</v-btn>
                   <v-btn value="distance" class="flex-grow-1 px-1" size="x-small">3D</v-btn>
                 </v-btn-toggle>
 
-                <!-- Prompt minimalista si no hay medición -->
+                <!-- Minimalist prompt when no measurement is active -->
                 <div
                   v-if="!currentMeasurement"
                   class="pa-2 rounded d-flex align-center justify-space-between mb-2"
@@ -723,14 +723,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                   <div class="d-flex align-center text-truncate mr-1">
                     <v-icon size="16" color="primary" class="mr-1 flex-shrink-0">mdi-cursor-default-click</v-icon>
                     <span class="text-caption font-weight-medium text-truncate" :title="measurePrompt || getSelectionPrompt()">
-                      {{ firstSelectionSnap ? 'P1 fijado • Clic en P2' : (measurePrompt || getSelectionPrompt()) }}
+                      {{ firstSelectionSnap ? 'P1 locked • Click P2' : (measurePrompt || getSelectionPrompt()) }}
                     </span>
                   </div>
                   <v-chip v-if="firstSelectionSnap" size="x-small" color="primary" variant="flat" class="font-weight-bold">1/2</v-chip>
                   <v-chip v-else-if="measureMode === 'radius' && radiusPointsCount > 0" size="x-small" color="primary" variant="flat" class="font-weight-bold">{{ radiusPointsCount }}/3</v-chip>
                 </div>
 
-                <!-- Resultado minimalista si hay medición activa -->
+                <!-- Minimalist result when measurement is active -->
                 <div
                   v-else
                   class="pa-2 rounded mb-2"
@@ -758,7 +758,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                         @click="copyMeasurementValue(currentMeasurement.primaryValue, 'primary')"
                       >
                         <v-icon size="14">{{ copiedTarget === 'primary' ? 'mdi-check' : 'mdi-content-copy' }}</v-icon>
-                        <v-tooltip activator="parent" location="top">Copiar valor</v-tooltip>
+                        <v-tooltip activator="parent" location="top">Copy value</v-tooltip>
                       </v-btn>
                       <v-btn
                         icon
@@ -768,7 +768,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                         @click="clearAllMeasurements"
                       >
                         <v-icon size="14">mdi-trash-can-outline</v-icon>
-                        <v-tooltip activator="parent" location="top">Borrar</v-tooltip>
+                        <v-tooltip activator="parent" location="top">Delete</v-tooltip>
                       </v-btn>
                     </div>
                   </div>
@@ -783,7 +783,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                     class="text-none font-weight-medium px-2"
                     @click="commitAndNewMeasurement"
                   >
-                    Fijar / Otra
+                    Pin / New
                   </v-btn>
                   <v-btn
                     size="x-small"
@@ -793,15 +793,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                     class="text-none font-weight-medium px-2"
                     @click="toggleMinimalistMode"
                   >
-                    + Desglose
+                    + Breakdown
                   </v-btn>
                 </div>
               </template>
 
-              <!-- VISTA COMPLETA: con desgloses, lista de cotas y persistencia -->
+              <!-- FULL VIEW: breakdown, measurement list and persistence -->
               <template v-else>
-                <!-- Modo de medición -->
-          <div class="text-caption font-weight-bold text-medium-emphasis mb-1">TIPO DE MEDICIÓN</div>
+                <!-- Measurement mode -->
+          <div class="text-caption font-weight-bold text-medium-emphasis mb-1">MEASUREMENT TYPE</div>
           <v-btn-toggle
             v-model="measureMode"
             mandatory
@@ -811,13 +811,13 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             @update:model-value="onMeasureModeChange"
           >
             <v-btn value="smart" class="flex-grow-1" size="small">Auto</v-btn>
-            <v-btn value="planes" class="flex-grow-1" size="small">Planos</v-btn>
-            <v-btn value="lines" class="flex-grow-1" size="small">Líneas</v-btn>
-            <v-btn value="radius" class="flex-grow-1" size="small">Radio / Ø</v-btn>
+            <v-btn value="planes" class="flex-grow-1" size="small">Planes</v-btn>
+            <v-btn value="lines" class="flex-grow-1" size="small">Lines</v-btn>
+            <v-btn value="radius" class="flex-grow-1" size="small">Radius / Ø</v-btn>
             <v-btn value="distance" class="flex-grow-1" size="small">3D</v-btn>
           </v-btn-toggle>
 
-          <!-- Prompt de interacción / Estado de selección -->
+          <!-- Interaction prompt / Selection status -->
           <div
             v-if="!currentMeasurement"
             class="pa-3 rounded mb-3"
@@ -825,15 +825,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           >
             <div v-if="firstSelectionSnap" class="d-flex align-center mb-1">
               <v-chip size="x-small" color="primary" class="mr-2 font-weight-bold" variant="flat">
-                Paso 1 Fijado
+                Step 1 Locked
               </v-chip>
               <span class="text-caption font-weight-medium" style="color: rgb(var(--v-theme-on-surface));">
-                {{ firstSelectionSnap.type === 'face' ? 'Cara plana' : (firstSelectionSnap.type === 'vertex' ? 'Punto / Vértice' : (firstSelectionSnap.type === 'edge' ? 'Línea / Arista' : (firstSelectionSnap.type === 'cylinder' ? 'Cilindro / Círculo' : 'Punto'))) }}
+                {{ firstSelectionSnap.type === 'face' ? 'Planar face' : (firstSelectionSnap.type === 'vertex' ? 'Point / Vertex' : (firstSelectionSnap.type === 'edge' ? 'Line / Edge' : (firstSelectionSnap.type === 'cylinder' ? 'Cylinder / Circle' : 'Point'))) }}
               </span>
             </div>
             <div v-if="measureMode === 'radius' && radiusPointsCount > 0" class="d-flex align-center mb-1">
               <v-chip size="x-small" color="primary" class="mr-2 font-weight-bold" variant="flat">
-                {{ radiusPointsCount }}/3 Puntos
+                {{ radiusPointsCount }}/3 Points
               </v-chip>
             </div>
             <div class="d-flex align-center">
@@ -844,11 +844,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             </div>
             <div class="text-caption text-medium-emphasis mt-2 pt-1 border-t d-flex align-center" style="font-size: 11px !important;">
               <v-icon size="x-small" class="mr-1">mdi-mouse</v-icon>
-              <span>Clic izquierdo: seleccionar | Clic derecho: rotar pieza</span>
+              <span>Left click: select | Right click: rotate view</span>
             </div>
           </div>
 
-          <!-- Resultado de la medición actual con botones de copia -->
+          <!-- Current measurement result with copy buttons -->
           <div
             v-else
             class="pa-3 rounded mb-3"
@@ -863,7 +863,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               </v-chip>
             </div>
 
-            <!-- Valor principal con botón de copia destacado -->
+            <!-- Primary value with copy button -->
             <div class="d-flex justify-space-between align-center my-1 pa-2 rounded" style="background-color: rgba(var(--v-theme-primary), 0.08); border: 1px solid rgba(var(--v-theme-primary), 0.15);">
               <div class="text-h5 font-weight-bold" style="color: rgb(var(--v-theme-primary)); line-height: 1.2;">
                 {{ currentMeasurement.primaryValue }}
@@ -877,7 +877,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               >
                 <v-icon size="16">{{ copiedTarget === 'primary' ? 'mdi-check' : 'mdi-content-copy' }}</v-icon>
                 <v-tooltip activator="parent" location="top">
-                  {{ copiedTarget === 'primary' ? '¡Valor copiado!' : 'Copiar valor principal' }}
+                  {{ copiedTarget === 'primary' ? 'Value copied!' : 'Copy primary value' }}
                 </v-tooltip>
               </v-btn>
             </div>
@@ -888,7 +888,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
 
             <v-divider class="my-2"></v-divider>
 
-            <!-- Detalles desglosados (deltas, centros, etc) con copiado por fila -->
+            <!-- Detailed breakdown (deltas, centers, etc) with per-row copy -->
             <div
               v-for="(detail, idx) in currentMeasurement.details"
               :key="detail.label"
@@ -908,14 +908,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 >
                   <v-icon size="13">{{ copiedTarget === 'detail-' + idx ? 'mdi-check' : 'mdi-content-copy' }}</v-icon>
                   <v-tooltip activator="parent" location="top">
-                    {{ copiedTarget === 'detail-' + idx ? '¡Copiado!' : 'Copiar ' + detail.label }}
+                    {{ copiedTarget === 'detail-' + idx ? 'Copied!' : 'Copy ' + detail.label }}
                   </v-tooltip>
                 </v-btn>
               </div>
             </div>
           </div>
 
-          <!-- Acciones Nueva Medición / Copiar / Borrar -->
+          <!-- Actions: New Measurement / Copy / Clear -->
           <div class="d-flex align-center ga-2 mt-2">
             <v-btn
               size="small"
@@ -925,7 +925,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               class="flex-grow-1 text-none font-weight-bold"
               @click="commitAndNewMeasurement"
             >
-              Fijar y Medir Otra
+              Pin & Measure New
             </v-btn>
             <v-btn
               v-if="currentMeasurement"
@@ -936,8 +936,8 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               class="text-none font-weight-medium"
               @click="copyAllMeasurement"
             >
-              {{ copiedTarget === 'all' ? '¡Copiado!' : 'Copiar' }}
-              <v-tooltip activator="parent" location="top">Copiar informe completo</v-tooltip>
+              {{ copiedTarget === 'all' ? 'Copied!' : 'Copy' }}
+              <v-tooltip activator="parent" location="top">Copy full report</v-tooltip>
             </v-btn>
             <v-btn
               size="small"
@@ -947,15 +947,15 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               class="text-none font-weight-medium"
               @click="clearAllMeasurements"
             >
-              Borrar
-              <v-tooltip activator="parent" location="top">Borrar todas las cotas en pantalla</v-tooltip>
+              Delete
+              <v-tooltip activator="parent" location="top">Delete all dimensions on screen</v-tooltip>
             </v-btn>
           </div>
 
-          <!-- Opciones de persistencia de cotas -->
+          <!-- Dimension persistence options -->
           <div class="mt-3 pt-2" style="border-top: 1px solid rgba(var(--v-theme-on-surface), 0.08);">
             <div class="d-flex align-center justify-space-between">
-              <span class="text-caption font-weight-medium">Mantener cotas al cerrar panel</span>
+              <span class="text-caption font-weight-medium">Keep dimensions when closing panel</span>
               <v-switch
                 v-model="keepMeasurementsOnExit"
                 density="compact"
@@ -966,11 +966,11 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             </div>
           </div>
 
-          <!-- Lista de cotas fijadas en pantalla -->
+          <!-- List of pinned dimensions on screen -->
           <div v-if="savedMeasurements && savedMeasurements.length > 0" class="mt-2">
             <div class="d-flex justify-space-between align-center mb-1">
               <span class="text-caption font-weight-bold text-medium-emphasis">
-                COTAS EN PANTALLA ({{ savedMeasurements.length }})
+                SCREEN DIMENSIONS ({{ savedMeasurements.length }})
               </span>
               <v-btn
                 variant="text"
@@ -979,7 +979,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                 class="px-1 text-caption"
                 @click="clearAllMeasurements"
               >
-                Limpiar todas
+                Clear all
               </v-btn>
             </div>
             <v-list density="compact" class="pa-0 bg-transparent" style="max-height: 120px; overflow-y: auto;">
@@ -1007,7 +1007,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
                     variant="text"
                     color="error"
                     @click.stop="deleteMeasurement(sm.id)"
-                    title="Eliminar esta cota"
+                    title="Delete this dimension"
                   >
                     <v-icon size="14">mdi-close</v-icon>
                   </v-btn>
@@ -1025,7 +1025,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
               prepend-icon="mdi-unfold-less-horizontal"
               @click="toggleMinimalistMode"
             >
-              Modo minimalista
+              Minimalist mode
             </v-btn>
           </div>
         </template>
@@ -1068,39 +1068,39 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           <v-divider />
 
           <v-list density="compact" class="py-1 bg-transparent">
-            <!-- Aislar / Salir de aislar -->
+            <!-- Isolate / Exit isolate -->
             <v-list-item
               :prepend-icon="contextMenu.isIsolated ? 'mdi-eye-off-outline' : 'mdi-select-compare'"
-              :title="contextMenu.isIsolated ? 'Salir de aislar' : 'Aislar pieza'"
+              :title="contextMenu.isIsolated ? 'Exit isolate' : 'Isolate part'"
               @click="contextMenu.isIsolated ? restoreIsolation() : isolatePart(contextMenu.modelObject)"
             />
 
-            <!-- Ocultar / Mostrar -->
+            <!-- Hide / Show -->
             <v-list-item
               :prepend-icon="contextMenu.isVisible ? 'mdi-eye-off' : 'mdi-eye'"
-              :title="contextMenu.isVisible ? 'Ocultar pieza' : 'Mostrar pieza'"
+              :title="contextMenu.isVisible ? 'Hide part' : 'Show part'"
               @click="togglePartVisibility(contextMenu.modelObject)"
             >
               <template v-slot:append>
-                <kbd class="text-caption text-medium-emphasis ml-2 px-1 rounded border font-monospace" style="font-size: 11px;">Espacio</kbd>
+                <kbd class="text-caption text-medium-emphasis ml-2 px-1 rounded border font-monospace" style="font-size: 11px;">Space</kbd>
               </template>
             </v-list-item>
 
-            <!-- Enfocar pieza en la vista -->
+            <!-- Focus part in view -->
             <v-list-item
               prepend-icon="mdi-crosshairs-gps"
-              title="Enfocar en la vista"
+              title="Focus in view"
               @click="zoomToPart(contextMenu.modelObject)"
             />
           </v-list>
 
           <v-divider />
 
-          <!-- Opacidad / Transparencia Rápida -->
+          <!-- Quick Opacity / Transparency -->
           <div class="px-3 py-2">
             <div class="text-caption text-medium-emphasis mb-1 d-flex align-center justify-space-between">
               <span class="d-flex align-center">
-                <v-icon size="small" class="mr-1">mdi-opacity</v-icon> Opacidad
+                <v-icon size="small" class="mr-1">mdi-opacity</v-icon> Opacity
               </span>
               <span class="font-weight-bold font-monospace text-primary">{{ Math.round(contextMenu.currentOpacity * 100) }}%</span>
             </div>
@@ -1122,17 +1122,17 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           <v-divider />
 
           <v-list density="compact" class="py-1 bg-transparent">
-            <!-- Propiedades e Información -->
+            <!-- Properties and Info -->
             <v-list-item
               prepend-icon="mdi-information-outline"
-              title="Propiedades CAD"
+              title="CAD Properties"
               @click="openPartInfo(contextMenu.modelObject)"
             />
 
-            <!-- Copiar Nombre -->
+            <!-- Copy Name -->
             <v-list-item
               prepend-icon="mdi-content-copy"
-              title="Copiar nombre"
+              title="Copy name"
               @click="copyPartName(contextMenu.modelObject)"
             />
           </v-list>
@@ -1143,7 +1143,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           <div class="px-3 pt-3 pb-2 d-flex align-center justify-space-between">
             <div class="d-flex align-center">
               <v-icon color="primary" class="mr-2">mdi-axis-arrow</v-icon>
-              <span class="text-subtitle-2 font-weight-bold">Espacio de trabajo 3D</span>
+              <span class="text-subtitle-2 font-weight-bold">3D Workspace</span>
             </div>
             <v-btn icon="mdi-close" variant="text" size="x-small" @click="contextMenu.show = false" />
           </div>
@@ -1153,32 +1153,32 @@ SPDX-License-Identifier: AGPL-3.0-or-later
           <v-list density="compact" class="py-1 bg-transparent">
             <v-list-item
               prepend-icon="mdi-eye"
-              title="Mostrar todas las piezas"
+              title="Show all parts"
               @click="showAllParts"
             />
 
             <v-list-item
               prepend-icon="mdi-opacity"
-              title="Restablecer opacidades (100%)"
+              title="Reset opacities (100%)"
               @click="resetAllOpacities"
             />
 
             <v-list-item
               v-if="contextMenu.hasIsolatedActive"
               prepend-icon="mdi-eye-check-outline"
-              title="Salir de aislamiento"
+              title="Exit isolation"
               @click="restoreIsolation"
             />
 
             <v-list-item
               prepend-icon="mdi-fit-to-screen-outline"
-              title="Enfocar todo el modelo"
+              title="Fit entire model"
               @click="fitModelToScreen"
             />
 
             <v-list-item
               prepend-icon="mdi-select-off"
-              title="Deseleccionar todo"
+              title="Deselect all"
               @click="clearSelection"
             />
           </v-list>
@@ -1216,69 +1216,69 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         <v-divider />
 
         <v-card-text class="pt-3 pb-2" style="max-height: 480px; overflow-y: auto;">
-          <!-- Dimensiones Bounding Box -->
-          <div class="text-caption font-weight-bold text-medium-emphasis mb-2">DIMENSIONES (BOUNDING BOX)</div>
+          <!-- Bounding Box Dimensions -->
+          <div class="text-caption font-weight-bold text-medium-emphasis mb-2">DIMENSIONS (BOUNDING BOX)</div>
           <v-row dense class="mb-3">
             <v-col cols="4">
               <v-card variant="tonal" class="pa-2 text-center" rounded="md">
-                <div class="text-caption text-medium-emphasis">Longitud X</div>
+                <div class="text-caption text-medium-emphasis">Length X</div>
                 <div class="text-body-2 font-weight-bold font-monospace text-primary">{{ selectedPartProps.sizeX.toFixed(2) }} mm</div>
               </v-card>
             </v-col>
             <v-col cols="4">
               <v-card variant="tonal" class="pa-2 text-center" rounded="md">
-                <div class="text-caption text-medium-emphasis">Ancho Y</div>
+                <div class="text-caption text-medium-emphasis">Width Y</div>
                 <div class="text-body-2 font-weight-bold font-monospace text-primary">{{ selectedPartProps.sizeY.toFixed(2) }} mm</div>
               </v-card>
             </v-col>
             <v-col cols="4">
               <v-card variant="tonal" class="pa-2 text-center" rounded="md">
-                <div class="text-caption text-medium-emphasis">Altura Z</div>
+                <div class="text-caption text-medium-emphasis">Height Z</div>
                 <div class="text-body-2 font-weight-bold font-monospace text-primary">{{ selectedPartProps.sizeZ.toFixed(2) }} mm</div>
               </v-card>
             </v-col>
           </v-row>
 
-          <!-- Centro Geométrico -->
-          <div class="text-caption font-weight-bold text-medium-emphasis mb-1">CENTRO GEOMÉTRICO (X, Y, Z)</div>
+          <!-- Geometric Center -->
+          <div class="text-caption font-weight-bold text-medium-emphasis mb-1">GEOMETRIC CENTER (X, Y, Z)</div>
           <v-sheet rounded="md" class="pa-2 mb-3 font-monospace text-caption" style="background-color: rgba(var(--v-theme-on-surface), 0.04); border: 1px solid rgba(var(--v-theme-on-surface), 0.08);">
             [{{ selectedPartProps.centerX.toFixed(2)}}, {{ selectedPartProps.centerY.toFixed(2)}}, {{ selectedPartProps.centerZ.toFixed(2)}}] mm
           </v-sheet>
 
-          <!-- Topología de Malla -->
-          <div class="text-caption font-weight-bold text-medium-emphasis mb-1">DETALLES DE MALLA CAD</div>
+          <!-- CAD Mesh Topology -->
+          <div class="text-caption font-weight-bold text-medium-emphasis mb-1">CAD MESH DETAILS</div>
           <v-table density="compact" class="mb-3 text-body-2" style="background: transparent;">
             <tbody>
               <tr>
-                <td class="text-medium-emphasis">Triángulos / Caras</td>
+                <td class="text-medium-emphasis">Triangles / Faces</td>
                 <td class="text-right font-weight-bold font-monospace">{{ selectedPartProps.triangleCount.toLocaleString() }}</td>
               </tr>
               <tr>
-                <td class="text-medium-emphasis">Vértices</td>
+                <td class="text-medium-emphasis">Vertices</td>
                 <td class="text-right font-weight-bold font-monospace">{{ selectedPartProps.vertexCount.toLocaleString() }}</td>
               </tr>
               <tr>
-                <td class="text-medium-emphasis">Submallas</td>
+                <td class="text-medium-emphasis">Submeshes</td>
                 <td class="text-right font-weight-bold font-monospace">{{ selectedPartProps.meshCount }}</td>
               </tr>
               <tr>
-                <td class="text-medium-emphasis">Volumen Caja Envolvente</td>
+                <td class="text-medium-emphasis">Bounding Box Volume</td>
                 <td class="text-right font-weight-bold font-monospace">{{ ((selectedPartProps.sizeX * selectedPartProps.sizeY * selectedPartProps.sizeZ) / 1000).toFixed(2) }} cm³</td>
               </tr>
               <tr>
-                <td class="text-medium-emphasis">Visibilidad</td>
+                <td class="text-medium-emphasis">Visibility</td>
                 <td class="text-right font-weight-bold font-monospace">
                   <v-chip size="x-small" :color="selectedPartProps.visible ? 'success' : 'warning'" variant="tonal">
-                    {{ selectedPartProps.visible ? 'Visible' : 'Oculto' }}
+                    {{ selectedPartProps.visible ? 'Visible' : 'Hidden' }}
                   </v-chip>
                 </td>
               </tr>
               <tr>
-                <td class="text-medium-emphasis">Opacidad Actual</td>
+                <td class="text-medium-emphasis">Current Opacity</td>
                 <td class="text-right font-weight-bold font-monospace">{{ Math.round(selectedPartProps.opacity * 100) }}%</td>
               </tr>
               <tr>
-                <td class="text-medium-emphasis">Color Base</td>
+                <td class="text-medium-emphasis">Base Color</td>
                 <td class="text-right d-flex align-center justify-end font-monospace">
                   <span :style="{ display: 'inline-block', width: '14px', height: '14px', backgroundColor: selectedPartProps.colorHex, borderRadius: '3px', marginRight: '6px', border: '1px solid rgba(0,0,0,0.2)' }"></span>
                   {{ selectedPartProps.colorHex }}
@@ -1287,9 +1287,9 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             </tbody>
           </v-table>
 
-          <!-- Propiedades Paramétricas FreeCAD (si existen) -->
+          <!-- FreeCAD Parametric Properties (if any) -->
           <div v-if="selectedPartProps.fcProperties && selectedPartProps.fcProperties.length > 0">
-            <div class="text-caption font-weight-bold text-medium-emphasis mb-1">PROPIEDADES FREECAD</div>
+            <div class="text-caption font-weight-bold text-medium-emphasis mb-1">FREECAD PROPERTIES</div>
             <v-table density="compact" class="text-body-2 mb-2" style="background: transparent;">
               <tbody>
                 <tr v-for="prop in selectedPartProps.fcProperties" :key="prop.name">
@@ -1311,14 +1311,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
             size="small"
             @click="copyAllProperties(selectedPartProps)"
           >
-            Copiar información
+            Copy information
           </v-btn>
           <v-btn
             variant="tonal"
             size="small"
             @click="partPropertiesDialog = false"
           >
-            Cerrar
+            Close
           </v-btn>
         </v-card-actions>
       </v-card>
@@ -1432,7 +1432,7 @@ export default {
         case 'touchpad': return 'Touchpad (FreeCAD)';
         case 'cad': return 'CAD (FreeCAD)';
         case 'blender': return 'Blender';
-        default: return 'Estándar / Órbita';
+        default: return 'Standard / Orbit';
       }
     },
     visibleMeasurementBadges() {
@@ -1556,16 +1556,16 @@ export default {
           if (res) {
             if (res.count === 1) {
               const name = res.firstObj.name || (res.firstObj.GetLabel ? res.firstObj.GetLabel() : 'CAD');
-              this.showSnackbar(res.targetVis ? `Pieza visible: ${name}` : `Pieza oculta: ${name}`);
+              this.showSnackbar(res.targetVis ? `Part visible: ${name}` : `Part hidden: ${name}`);
             } else {
               const visibleCount = res.objs.filter(o => (o.GetVisibility ? o.GetVisibility() : true)).length;
               const hiddenCount = res.count - visibleCount;
               if (hiddenCount === 0) {
-                this.showSnackbar(`${res.count} piezas visibles`);
+                this.showSnackbar(`${res.count} visible parts`);
               } else if (visibleCount === 0) {
-                this.showSnackbar(`${res.count} piezas ocultas`);
+                this.showSnackbar(`${res.count} hidden parts`);
               } else {
-                this.showSnackbar(`Visibilidad alternada (${visibleCount} visibles, ${hiddenCount} ocultas)`);
+                this.showSnackbar(`Toggled visibility (${visibleCount} visible, ${hiddenCount} hidden)`);
               }
             }
           }
@@ -1582,7 +1582,7 @@ export default {
               this.viewer.toggleObjectVisibility(modelObj);
               const isVis = modelObj.GetVisibility ? modelObj.GetVisibility() : true;
               const name = modelObj.name || (modelObj.GetLabel ? modelObj.GetLabel() : 'CAD');
-              this.showSnackbar(isVis ? `Pieza visible: ${name}` : `Pieza oculta: ${name}`);
+              this.showSnackbar(isVis ? `Part visible: ${name}` : `Part hidden: ${name}`);
               return;
             }
           }
@@ -1744,7 +1744,7 @@ export default {
         this.viewer.setNavigationStyle(style);
       }
       this.navMenuOpen = false;
-      this.snackbarText = `Navegación 3D: ${this.navStyleTitle}`;
+      this.snackbarText = `3D Navigation: ${this.navStyleTitle}`;
       this.snackbar = true;
     },
 
@@ -1955,21 +1955,21 @@ export default {
 
     getSelectionPrompt() {
       if (this.firstSelectionSnap) {
-        return 'Selecciona el segundo elemento (punto, arista, cara o orificio)...';
+        return 'Select the second element (point, edge, face or bore)...';
       }
       if (this.measureMode === 'planes') {
-        return 'Haz clic en la primera cara plana...';
+        return 'Click on the first planar face...';
       }
       if (this.measureMode === 'lines') {
-        return 'Haz clic en la primera arista o línea recta...';
+        return 'Click on the first edge or straight line...';
       }
       if (this.measureMode === 'radius') {
-        return 'Haz clic en un orificio, cilindro o arista curva...';
+        return 'Click on a bore, cylinder or curved edge...';
       }
       if (this.measureMode === 'distance') {
-        return 'Haz clic en el primer punto o vértice...';
+        return 'Click on the first point or vertex...';
       }
-      return 'Haz clic en cualquier cara, arista, orificio o punto...';
+      return 'Click on any face, edge, bore or point...';
     },
 
     async copyToClipboard(text) {
@@ -2000,7 +2000,7 @@ export default {
       const ok = await this.copyToClipboard(text);
       if (ok) {
         this.copiedTarget = targetId;
-        this.snackbarText = `Copiado: ${text}`;
+        this.snackbarText = `Copied: ${text}`;
         this.snackbar = true;
         setTimeout(() => {
           if (this.copiedTarget === targetId) {
@@ -2014,14 +2014,14 @@ export default {
       if (!this.currentMeasurement) return;
       const m = this.currentMeasurement;
       const lines = [
-        `=== Medición CAD: ${m.title} ===`,
-        `Resultado Principal: ${m.primaryValue}`
+        `=== CAD Measurement: ${m.title} ===`,
+        `Primary Result: ${m.primaryValue}`
       ];
       if (m.secondaryValue) {
-        lines.push(`Información Secundaria: ${m.secondaryValue}`);
+        lines.push(`Secondary Information: ${m.secondaryValue}`);
       }
       if (m.details && m.details.length > 0) {
-        lines.push(`Detalles Técnicos:`);
+        lines.push(`Technical Details:`);
         m.details.forEach(d => {
           lines.push(`  • ${d.label}: ${d.value}`);
         });
@@ -2030,7 +2030,7 @@ export default {
       const ok = await this.copyToClipboard(text);
       if (ok) {
         this.copiedTarget = 'all';
-        this.snackbarText = '¡Informe completo de medición copiado al portapapeles!';
+        this.snackbarText = 'Complete measurement report copied to clipboard!';
         this.snackbar = true;
         setTimeout(() => {
           if (this.copiedTarget === 'all') {
@@ -2059,7 +2059,7 @@ export default {
 
         const color = modelObject.GetColor ? modelObject.GetColor() : null;
         this.contextMenu.colorHex = color ? '#' + color.getHexString() : '#00e5ff';
-        this.contextMenu.targetName = modelObject.name || 'Pieza CAD';
+        this.contextMenu.targetName = modelObject.name || 'CAD Part';
         this.contextMenu.targetType = modelObject.GetType ? modelObject.GetType() : (modelObject.type || 'Shape');
         this.contextMenu.isVisible = modelObject.GetVisibility ? modelObject.GetVisibility() : true;
         this.contextMenu.isIsolated = this.viewer ? !!(this.viewer.isolatedObject && this.viewer.isolatedObject.uuid === modelObject.uuid) : false;
@@ -2076,28 +2076,28 @@ export default {
       if (!this.viewer || !modelObject) return;
       this.viewer.isolateObject(modelObject);
       this.contextMenu.show = false;
-      this.showSnackbar(`Pieza aislada: ${modelObject.name || 'CAD'}`);
+      this.showSnackbar(`Part isolated: ${modelObject.name || 'CAD'}`);
     },
 
     restoreIsolation() {
       if (!this.viewer) return;
       this.viewer.restoreIsolation();
       this.contextMenu.show = false;
-      this.showSnackbar('Aislamiento cancelado. Mostrando todas las piezas.');
+      this.showSnackbar('Isolation cleared. Showing all parts.');
     },
 
     hidePart(modelObject) {
       if (!this.viewer || !modelObject) return;
       this.viewer.hideObject(modelObject);
       this.contextMenu.show = false;
-      this.showSnackbar(`Pieza oculta: ${modelObject.name || 'CAD'}`);
+      this.showSnackbar(`Part hidden: ${modelObject.name || 'CAD'}`);
     },
 
     showPart(modelObject) {
       if (!this.viewer || !modelObject) return;
       this.viewer.showObject(modelObject);
       this.contextMenu.show = false;
-      this.showSnackbar(`Pieza visible: ${modelObject.name || 'CAD'}`);
+      this.showSnackbar(`Part visible: ${modelObject.name || 'CAD'}`);
     },
 
     togglePartVisibility(modelObject) {
@@ -2105,28 +2105,28 @@ export default {
       this.viewer.toggleObjectVisibility(modelObject);
       const isVisible = modelObject.GetVisibility ? modelObject.GetVisibility() : true;
       this.contextMenu.show = false;
-      this.showSnackbar(isVisible ? `Pieza visible: ${modelObject.name || 'CAD'}` : `Pieza oculta: ${modelObject.name || 'CAD'}`);
+      this.showSnackbar(isVisible ? `Part visible: ${modelObject.name || 'CAD'}` : `Part hidden: ${modelObject.name || 'CAD'}`);
     },
 
     showAllParts() {
       if (!this.viewer) return;
       this.viewer.showAllObjects();
       this.contextMenu.show = false;
-      this.showSnackbar('Todas las piezas están visibles');
+      this.showSnackbar('All parts are visible');
     },
 
     setPartOpacity(modelObject, opacity) {
       if (!this.viewer || !modelObject) return;
       this.viewer.setObjectOpacity(modelObject, opacity);
       this.contextMenu.currentOpacity = opacity;
-      this.showSnackbar(`Opacidad de "${modelObject.name || 'pieza'}" ajustada al ${Math.round(opacity * 100)}%`);
+      this.showSnackbar(`Opacity of "${modelObject.name || 'part'}" set to ${Math.round(opacity * 100)}%`);
     },
 
     resetAllOpacities() {
       if (!this.viewer) return;
       this.viewer.resetAllOpacities();
       this.contextMenu.show = false;
-      this.showSnackbar('Todas las opacidades restablecidas al 100%');
+      this.showSnackbar('All opacities reset to 100%');
     },
 
     zoomToPart(modelObject) {
@@ -2154,39 +2154,39 @@ export default {
       const name = modelObject.name || '';
       navigator.clipboard.writeText(name);
       this.contextMenu.show = false;
-      this.showSnackbar(`Nombre copiado: "${name}"`);
+      this.showSnackbar(`Name copied: "${name}"`);
     },
 
     copyAllProperties(props) {
       if (!props) return;
       const lines = [
-        `=== PROPIEDADES CAD ===`,
-        `Nombre: ${props.name}`,
-        props.realName ? `Nombre Real: ${props.realName}` : null,
-        `Tipo: ${props.type}`,
+        `=== CAD PROPERTIES ===`,
+        `Name: ${props.name}`,
+        props.realName ? `Real Name: ${props.realName}` : null,
+        `Type: ${props.type}`,
         `UUID: ${props.uuid}`,
-        `--- DIMENSIONES ---`,
-        `Longitud X: ${props.sizeX.toFixed(2)} mm`,
-        `Ancho Y: ${props.sizeY.toFixed(2)} mm`,
-        `Altura Z: ${props.sizeZ.toFixed(2)} mm`,
-        `Volumen Caja: ${((props.sizeX * props.sizeY * props.sizeZ) / 1000).toFixed(2)} cm³`,
-        `Centro: [${props.centerX.toFixed(2)}, ${props.centerY.toFixed(2)}, ${props.centerZ.toFixed(2)}] mm`,
-        `--- TOPOLOGÍA ---`,
-        `Triángulos: ${props.triangleCount.toLocaleString()}`,
-        `Vértices: ${props.vertexCount.toLocaleString()}`,
-        `Submallas: ${props.meshCount}`,
-        `Visibilidad: ${props.visible ? 'Visible' : 'Oculto'}`,
-        `Opacidad: ${Math.round(props.opacity * 100)}%`,
-        `Color Hex: ${props.colorHex}`
+        `--- DIMENSIONS ---`,
+        `Length X: ${props.sizeX.toFixed(2)} mm`,
+        `Width Y: ${props.sizeY.toFixed(2)} mm`,
+        `Height Z: ${props.sizeZ.toFixed(2)} mm`,
+        `Bounding Box Volume: ${((props.sizeX * props.sizeY * props.sizeZ) / 1000).toFixed(2)} cm³`,
+        `Center: [${props.centerX.toFixed(2)}, ${props.centerY.toFixed(2)}, ${props.centerZ.toFixed(2)}] mm`,
+        `--- TOPOLOGY ---`,
+        `Triangles: ${props.triangleCount.toLocaleString()}`,
+        `Vertices: ${props.vertexCount.toLocaleString()}`,
+        `Submeshes: ${props.meshCount}`,
+        `Visibility: ${props.visible ? 'Visible' : 'Hidden'}`,
+        `Opacity: ${Math.round(props.opacity * 100)}%`,
+        `Base Color: ${props.colorHex}`
       ].filter(Boolean);
 
       if (props.fcProperties && props.fcProperties.length > 0) {
-        lines.push('--- PROPIEDADES FREECAD ---');
+        lines.push('--- FREECAD PROPERTIES ---');
         props.fcProperties.forEach(p => lines.push(`${p.name}: ${p.value}`));
       }
 
       navigator.clipboard.writeText(lines.join('\n'));
-      this.showSnackbar('Todas las propiedades copiadas al portapapeles');
+      this.showSnackbar('All properties copied to clipboard');
     },
 
     loadSavedPanelPositions() {
@@ -2359,7 +2359,7 @@ export default {
       try {
         localStorage.removeItem(`ondsel_${panelType}_panel_pos`);
       } catch (e) {}
-      this.showSnackbar('Posición del panel restablecida');
+      this.showSnackbar('Panel position reset');
     },
 
     getSectionPanelStyle() {

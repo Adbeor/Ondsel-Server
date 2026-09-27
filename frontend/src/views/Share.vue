@@ -32,14 +32,14 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       <v-tooltip
         activator="parent"
         location="start"
-      >Análisis de sección / Cortes 3D</v-tooltip>
+      >Section Analysis / 3D Cross-Sections</v-tooltip>
     </v-btn>
     <v-btn icon flat :color="isMeasureActive ? 'primary' : undefined" :variant="isMeasureActive ? 'tonal' : 'text'" @click="toggleMeasurementTool">
       <v-icon :color="isMeasureActive ? 'primary' : 'on-surface'">mdi-ruler-square</v-icon>
       <v-tooltip
         activator="parent"
         location="start"
-      >Medición CAD (Planos, Radios, Líneas)</v-tooltip>
+      >CAD Measurement (Planes, Radii, Edges)</v-tooltip>
     </v-btn>
     <v-btn icon flat @click="openAttributeViewer" v-if="sharedModel && (sharedModel.canViewModelAttributes || sharedModel.canUpdateModel)">
       <v-icon>mdi-view-list</v-icon>

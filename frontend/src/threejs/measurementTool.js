@@ -112,7 +112,7 @@ export function getMeshTopology(mesh) {
     }
   }
 
-  // Precompute crease / feature edge graph (for instant circular rim & arista tracing)
+  // Precompute crease / feature edge graph (for instant circular rim & edge tracing)
   const creaseAdjacency = new Map();
   const creaseEdgeSet = new Set();
 
@@ -124,7 +124,7 @@ export function getMeshTopology(mesh) {
       const n1 = triangles[tris[0]].normal;
       const n2 = triangles[tris[1]].normal;
       if (n1.dot(n2) < 0.985) {
-        isCrease = true; // Sharp crease edge (e.g. hole rim, arista or cylinder shoulder)
+        isCrease = true; // Sharp crease edge (e.g. hole rim, edge or cylinder shoulder)
       }
     }
 
@@ -969,7 +969,7 @@ export function detectCADVertex(mesh, seedTriangleIndex, hitPoint, snapDist = 15
 }
 
 /**
- * Detects whether the clicked/hovered mesh triangle or point is adjacent to a straight CAD edge (arista recta),
+ * Detects whether the clicked/hovered mesh triangle or point is adjacent to a straight CAD edge,
  * tracing collinear connected crease edges and extracting exact start point, end point, length, and direction.
  */
 export function detectCADStraightEdge(mesh, seedTriangleIndex, hitPoint, cameraRayDirection = null, snapDist = 20.0) {
@@ -1550,7 +1550,7 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
       spanDeg: arcSpanDeg,
       startAngle,
       endAngle,
-      label: depth > 0.05 ? (isHole ? 'Orificio Cilíndrico' : (isArc ? 'Cilindro / Arco' : 'Cilindro / Eje')) : (isArc ? 'Arco Circular' : 'Arista Circular'),
+      label: depth > 0.05 ? (isHole ? 'Cylindrical Bore' : (isArc ? 'Cylindrical Arc' : 'Cylindrical Shaft')) : (isArc ? 'Circular Arc' : 'Circular Edge'),
       mesh,
       radius,
       diameter,
@@ -1762,7 +1762,7 @@ export function detectCADCylinderOrCircle(mesh, seedTriangleIndex, hitPoint, cam
               spanDeg: arcSpanDeg,
               startAngle,
               endAngle,
-              label: isHole ? 'Orificio Cilíndrico' : (isArc ? 'Cilindro / Arco' : 'Cilindro / Eje'),
+              label: isHole ? 'Cylindrical Bore' : (isArc ? 'Cylindrical Arc' : 'Cylindrical Shaft'),
               mesh,
               radius,
               diameter,
@@ -1806,6 +1806,9 @@ export class MeasurementTool {
     this.currentMeasurement = null;
     this.badges = [];
     this.statusPrompt = '';
+
+    // CAD Debug logging flag (false = silent production console, true = verbose diagnostic logs)
+    this.debug = false;
 
     // 3D Depth & X-Ray behavior:
     // When false (default): respects realistic 3D occlusion (markers don't blindly shine through solid walls).
@@ -1924,6 +1927,33 @@ export class MeasurementTool {
     this.onUpdateCallback = null;
   }
 
+  /**
+   * Diagnostic CAD debug logger:
+   * Silent by default. Activated dynamically via:
+   *   window.__CAD_DEBUG__ = true
+   *   or localStorage.setItem('cad_debug', 'true')
+   *   or window.enableCADDebug(true)
+   */
+  log(...args) {
+    if (
+      this.debug ||
+      (typeof window !== 'undefined' &&
+        (window.__CAD_DEBUG__ || window.localStorage?.getItem('cad_debug') === 'true'))
+    ) {
+      console.log('[CAD Measure]', ...args);
+    }
+  }
+
+  warn(...args) {
+    if (
+      this.debug ||
+      (typeof window !== 'undefined' &&
+        (window.__CAD_DEBUG__ || window.localStorage?.getItem('cad_debug') === 'true'))
+    ) {
+      console.warn('[CAD Measure]', ...args);
+    }
+  }
+
   getDimensionColor() {
     return this.isDarkTheme ? COLOR_DIMENSION_DARK : COLOR_DIMENSION_LIGHT;
   }
@@ -1999,7 +2029,7 @@ export class MeasurementTool {
     }
 
     this.updateDefaultPrompt();
-    console.log('[CAD Measure] Activated in mode:', this.mode, 'Camera ready.');
+    this.log('Activated in mode:', this.mode, 'Camera ready.');
     this.emitUpdate();
   }
 
@@ -2049,14 +2079,14 @@ export class MeasurementTool {
     this._pointerDownPos = null;
     this._pointerMoved = false;
 
-    console.log('[CAD Measure] Deactivated. Standard navigation restored. Active saved cotas:', this.savedMeasurements.length);
+    this.log('Deactivated. Standard navigation restored. Active saved dimensions:', this.savedMeasurements.length);
     this.emitUpdate();
   }
 
   setMode(mode) {
     this.mode = mode;
     this.reset();
-    console.log('[CAD Measure] Mode switched to:', mode);
+    this.log('Mode switched to:', mode);
   }
 
   setXray(enabled) {
@@ -2067,7 +2097,7 @@ export class MeasurementTool {
     if (this.snapMarkerRing && this.snapMarkerRing.material) {
       this.snapMarkerRing.material.depthTest = !this.xray;
     }
-    console.log('[CAD Measure] X-Ray mode:', this.xray);
+    this.log('X-Ray mode:', this.xray);
     this.refreshVisuals();
   }
 
@@ -2153,15 +2183,15 @@ export class MeasurementTool {
 
   updateDefaultPrompt() {
     if (this.mode === 'planes') {
-      this.statusPrompt = 'Haz clic en la primera cara plana...';
+      this.statusPrompt = 'Click on the first planar face...';
     } else if (this.mode === 'lines') {
-      this.statusPrompt = 'Haz clic en la primera arista o línea recta...';
+      this.statusPrompt = 'Click on the first edge or straight line...';
     } else if (this.mode === 'radius') {
-      this.statusPrompt = 'Haz clic en un orificio cilíndrico o arista curva...';
+      this.statusPrompt = 'Click on a cylindrical bore or curved edge...';
     } else if (this.mode === 'distance') {
-      this.statusPrompt = 'Haz clic en el primer punto sobre el modelo 3D...';
+      this.statusPrompt = 'Click on the first 3D point on the model...';
     } else {
-      this.statusPrompt = 'Haz clic en cualquier punto, arista, orificio o cara para medir...';
+      this.statusPrompt = 'Click on any face, edge, bore or point to measure...';
     }
   }
 
@@ -2787,7 +2817,7 @@ export class MeasurementTool {
   }
 
   /**
-   * Process Straight Line / Edge selection (aristas CAD rectas)
+   * Process Straight Line / Edge selection (straight CAD edges)
    */
   processLinesSelection(snap) {
     let edgeData = snap.edgeData || null;
@@ -2796,7 +2826,7 @@ export class MeasurementTool {
     }
 
     if (!edgeData) {
-      this.statusPrompt = 'No se detectó una arista recta cerca del cursor. Haz clic sobre una arista o borde del modelo.';
+      this.statusPrompt = 'No straight edge detected near the cursor. Click on a model edge or boundary.';
       this.emitUpdate();
       return;
     }
@@ -2817,7 +2847,7 @@ export class MeasurementTool {
         firstEdge.p1.distanceTo(edgeData.p1) < 0.1 &&
         firstEdge.p2.distanceTo(edgeData.p2) < 0.1
       ) {
-        console.log('[CAD Measure] Clic en la misma arista que Arista 1. Ignorado.');
+        this.log('Clicked on the same edge as Edge 1. Ignored.');
         return;
       }
 
@@ -2851,14 +2881,14 @@ export class MeasurementTool {
         this.renderPlaneHighlight(snap.point, snap.normal, COLOR_ITEM1, '1');
       }
 
-      this.statusPrompt = `Cara 1 fijada en (${snap.point.x.toFixed(1)}, ${snap.point.y.toFixed(1)}, ${snap.point.z.toFixed(1)}). Ahora haz clic en la segunda cara plana...`;
-      console.log('[CAD Measure] Cara 1 locked with exact CAD face geometry:', !!faceData);
+      this.statusPrompt = `Face 1 locked at (${snap.point.x.toFixed(1)}, ${snap.point.y.toFixed(1)}, ${snap.point.z.toFixed(1)}). Now click on the second planar face...`;
+      this.log('Face 1 locked with exact CAD face geometry:', !!faceData);
       this.emitUpdate();
     } else {
       // Step 2: Select Face 2
       const dist = this.firstSelection.point.distanceTo(snap.point);
       if (dist < 0.1) {
-        console.log('[CAD Measure] Clic en el mismo punto que Cara 1 (< 0.1mm). Ignorado.');
+        this.log('Clicked on the same point as Face 1 (< 0.1mm). Ignored.');
         return;
       }
 
@@ -2879,7 +2909,7 @@ export class MeasurementTool {
         this.renderPlaneHighlight(snap.point, snap.normal, COLOR_ITEM2, '2');
       }
 
-      console.log('[CAD Measure] Cara 2 locked with exact CAD face geometry:', !!faceData);
+      this.log('Face 2 locked with exact CAD face geometry:', !!faceData);
       this.computePlanesMeasurement(this.firstSelection, this.secondSelection);
     }
   }
@@ -2920,7 +2950,7 @@ export class MeasurementTool {
             )
           )
         ) {
-          console.log('[CAD Measure] Clic en el mismo cilindro que Cilindro 1. Ignorado.');
+          this.log('Clicked on the same cylinder as Cylinder 1. Ignored.');
           return;
         }
 
@@ -2938,11 +2968,11 @@ export class MeasurementTool {
 
       if (this.arcPoints.length === 1) {
         this.renderPointMarker(snap.point, COLOR_ITEM1, 'A');
-        this.statusPrompt = 'Punto 1/3 fijado. Haz clic en el 2º punto del arco o circunferencia...';
+        this.statusPrompt = 'Point 1/3 set. Click on the 2nd point of the arc or circumference...';
         this.emitUpdate();
       } else if (this.arcPoints.length === 2) {
         this.renderPointMarker(snap.point, COLOR_ITEM1, 'B');
-        this.statusPrompt = 'Punto 2/3 fijado. Haz clic en el 3º punto para calcular el radio...';
+        this.statusPrompt = 'Point 2/3 set. Click on the 3rd point to calculate radius...';
         this.emitUpdate();
       } else if (this.arcPoints.length >= 3) {
         const [A, B, C] = this.arcPoints;
@@ -2955,28 +2985,28 @@ export class MeasurementTool {
 
           this.currentMeasurement = {
             type: 'arc_3point',
-            title: 'Círculo por 3 Puntos (Arco)',
+            title: '3-Point Circle (Arc)',
             distance: circleData.diameter,
             unit: 'mm',
             primaryValue: `Ø ${circleData.diameter.toFixed(2)} mm`,
-            secondaryValue: `Radio: ${circleData.radius.toFixed(2)} mm`,
+            secondaryValue: `Radius: ${circleData.radius.toFixed(2)} mm`,
             targetMeshes: [snap.mesh || (snap.rawHit && snap.rawHit.object)].filter(Boolean),
             targetPoints: [A, B, C].filter(Boolean),
             details: [
-              { label: 'Diámetro (Ø)', value: `Ø ${circleData.diameter.toFixed(2)} mm` },
-              { label: 'Radio (R)', value: `${circleData.radius.toFixed(2)} mm` },
-              { label: 'Centro 3D', value: `(${circleData.center.x.toFixed(1)}, ${circleData.center.y.toFixed(1)}, ${circleData.center.z.toFixed(1)})` },
-              { label: 'Normal del Plano', value: `[${circleData.normal.x.toFixed(2)}, ${circleData.normal.y.toFixed(2)}, ${circleData.normal.z.toFixed(2)}]` },
-              { label: 'Punto 1', value: `(${A.x.toFixed(1)}, ${A.y.toFixed(1)}, ${A.z.toFixed(1)})` },
-              { label: 'Punto 2', value: `(${B.x.toFixed(1)}, ${B.y.toFixed(1)}, ${B.z.toFixed(1)})` },
-              { label: 'Punto 3', value: `(${C.x.toFixed(1)}, ${C.y.toFixed(1)}, ${C.z.toFixed(1)})` }
+              { label: 'Diameter (Ø)', value: `Ø ${circleData.diameter.toFixed(2)} mm` },
+              { label: 'Radius (R)', value: `${circleData.radius.toFixed(2)} mm` },
+              { label: '3D Center', value: `(${circleData.center.x.toFixed(1)}, ${circleData.center.y.toFixed(1)}, ${circleData.center.z.toFixed(1)})` },
+              { label: 'Plane Normal', value: `[${circleData.normal.x.toFixed(2)}, ${circleData.normal.y.toFixed(2)}, ${circleData.normal.z.toFixed(2)}]` },
+              { label: 'Point 1', value: `(${A.x.toFixed(1)}, ${A.y.toFixed(1)}, ${A.z.toFixed(1)})` },
+              { label: 'Point 2', value: `(${B.x.toFixed(1)}, ${B.y.toFixed(1)}, ${B.z.toFixed(1)})` },
+              { label: 'Point 3', value: `(${C.x.toFixed(1)}, ${C.y.toFixed(1)}, ${C.z.toFixed(1)})` }
             ]
           };
 
-          this.statusPrompt = `Círculo calculado: Ø ${circleData.diameter.toFixed(2)} mm (R: ${circleData.radius.toFixed(2)} mm). Haz clic para otra medición.`;
+          this.statusPrompt = `Circle computed: Ø ${circleData.diameter.toFixed(2)} mm (R: ${circleData.radius.toFixed(2)} mm). Click again for another measurement.`;
           this.emitUpdate();
         } else {
-          this.statusPrompt = 'Puntos colineales o inválidos. Haz clic de nuevo.';
+          this.statusPrompt = 'Collinear or invalid points. Please click again.';
           this.arcPoints = [];
           this.emitUpdate();
         }
@@ -3027,45 +3057,45 @@ export class MeasurementTool {
     const primaryDist = isNested ? (isConcentric ? Math.max(0, radialClearance) : axisDist) : (isParallel ? closest.distance : directDist);
 
     const fitType = isNested
-      ? (r1 < r2 ? 'Cuerpo 1 (Eje/Pin interior) en Cuerpo 2 (Orificio exterior)' : 'Cuerpo 2 (Eje/Pin interior) en Cuerpo 1 (Orificio exterior)')
-      : 'Cilindros Separados (Lado a lado)';
+      ? (r1 < r2 ? 'Body 1 (Inner Shaft/Pin) in Body 2 (Outer Bore/Hole)' : 'Body 2 (Inner Shaft/Pin) in Body 1 (Outer Bore/Hole)')
+      : 'Separate Cylinders (Side by side)';
 
     const measurement = {
       type: isConcentric ? 'cylinders_concentric' : (isNested ? 'cylinders_nested' : 'cylinders_distance'),
-      title: isConcentric ? 'Encaje Cilíndrico Concéntrico (Eje en Orificio)' : (isNested ? 'Encaje Cilíndrico con Excentricidad' : 'Distancia entre Cilindros / Orificios'),
+      title: isConcentric ? 'Concentric Cylindrical Fit (Coincident Axes)' : (isNested ? 'Cylindrical Fit with Eccentricity' : 'Distance between Cylinders / Bores'),
       distance: primaryDist,
       unit: 'mm',
       primaryValue: isNested
-        ? (isConcentric ? `Holgura radial: ${radialClearance.toFixed(2)} mm (ΔØ ${deltaDia.toFixed(2)} mm)` : `Holgura mín.: ${Math.max(0, radialClearance).toFixed(2)} mm (Ejes: ${axisDist.toFixed(2)} mm)`)
-        : `${primaryDist.toFixed(2)} mm (Centros)`,
+        ? (isConcentric ? `Radial clearance: ${radialClearance.toFixed(2)} mm (ΔØ ${deltaDia.toFixed(2)} mm)` : `Min clearance: ${Math.max(0, radialClearance).toFixed(2)} mm (Axes: ${axisDist.toFixed(2)} mm)`)
+        : `${primaryDist.toFixed(2)} mm (Centers)`,
       secondaryValue: isNested
-        ? `Ø1: ${cyl1.diameter.toFixed(2)} mm | Ø2: ${cyl2.diameter.toFixed(2)} mm | ${isConcentric ? 'Ejes concéntricos (0.00 mm)' : `Excentricidad: ${axisDist.toFixed(2)} mm`}`
-        : `Pared mín.: ${wallClearance.toFixed(2)} mm | Ejes ${isParallel ? 'Paralelos (0.0°)' : `${closest.angleDeg.toFixed(1)}°`}`,
+        ? `Ø1: ${cyl1.diameter.toFixed(2)} mm | Ø2: ${cyl2.diameter.toFixed(2)} mm | ${isConcentric ? 'Concentric axes (0.00 mm)' : `Eccentricity: ${axisDist.toFixed(2)} mm`}`
+        : `Min wall: ${wallClearance.toFixed(2)} mm | Axes ${isParallel ? 'Parallel (0.0°)' : `${closest.angleDeg.toFixed(1)}°`}`,
       targetMeshes: [cyl1.mesh, cyl2.mesh].filter(Boolean),
       targetPoints: [C1, C2].filter(Boolean),
       targetCylinders: [cyl1, cyl2],
       cyl1,
       cyl2,
       details: [
-        { label: 'Relación / Ajuste', value: isConcentric ? 'Concéntricos (Ejes coincidentes 0.0°)' : (isNested ? 'Encaje con Excentricidad' : (isParallel ? 'Paralelos' : `Ángulo: ${closest.angleDeg.toFixed(1)}°`)) },
-        { label: 'Holgura / Juego Radial', value: isNested ? `${Math.max(0, radialClearance).toFixed(2)} mm (por lado)` : `${wallClearance.toFixed(2)} mm (entre paredes)` },
-        { label: 'Diferencia de Diámetros (ΔØ)', value: `Ø ${deltaDia.toFixed(2)} mm` },
-        { label: 'Distancia entre Ejes (Excentricidad)', value: `${axisDist.toFixed(2)} mm` },
-        { label: 'Tipo de Encaje', value: fitType },
-        { label: cyl1.label || 'Cilindro 1', value: `Ø ${cyl1.diameter.toFixed(2)} mm (R: ${cyl1.radius.toFixed(2)} mm)` },
-        { label: cyl2.label || 'Cilindro 2', value: `Ø ${cyl2.diameter.toFixed(2)} mm (R: ${cyl2.radius.toFixed(2)} mm)` },
-        { label: 'Componente ΔX', value: `${deltaX.toFixed(2)} mm` },
-        { label: 'Componente ΔY', value: `${deltaY.toFixed(2)} mm` },
-        { label: 'Componente ΔZ', value: `${deltaZ.toFixed(2)} mm` },
-        { label: 'Centro 1', value: formatVec3(C1) },
-        { label: 'Centro 2', value: formatVec3(C2) }
+        { label: 'Relationship / Fit', value: isConcentric ? 'Concentric (Coincident axes 0.0°)' : (isNested ? 'Fit with Eccentricity' : (isParallel ? 'Parallel' : `Angle: ${closest.angleDeg.toFixed(1)}°`)) },
+        { label: 'Radial Clearance / Play', value: isNested ? `${Math.max(0, radialClearance).toFixed(2)} mm (per side)` : `${wallClearance.toFixed(2)} mm (between walls)` },
+        { label: 'Diameter Difference (ΔØ)', value: `Ø ${deltaDia.toFixed(2)} mm` },
+        { label: 'Axis Distance (Eccentricity)', value: `${axisDist.toFixed(2)} mm` },
+        { label: 'Fit Type', value: fitType },
+        { label: cyl1.label || 'Cylinder 1', value: `Ø ${cyl1.diameter.toFixed(2)} mm (R: ${cyl1.radius.toFixed(2)} mm)` },
+        { label: cyl2.label || 'Cylinder 2', value: `Ø ${cyl2.diameter.toFixed(2)} mm (R: ${cyl2.radius.toFixed(2)} mm)` },
+        { label: 'ΔX Component', value: `${deltaX.toFixed(2)} mm` },
+        { label: 'ΔY Component', value: `${deltaY.toFixed(2)} mm` },
+        { label: 'ΔZ Component', value: `${deltaZ.toFixed(2)} mm` },
+        { label: 'Center 1', value: formatVec3(C1) },
+        { label: 'Center 2', value: formatVec3(C2) }
       ]
     };
 
     this.currentMeasurement = measurement;
     this.statusPrompt = isNested
-      ? `Encaje cilíndrico detectado: Holgura radial ${radialClearance.toFixed(2)} mm (ΔØ ${deltaDia.toFixed(2)} mm). Haz clic para otra medición.`
-      : `Distancia entre centros: ${primaryDist.toFixed(2)} mm. Haz clic de nuevo para otra medición.`;
+      ? `Cylindrical fit detected: Radial clearance ${radialClearance.toFixed(2)} mm (ΔØ ${deltaDia.toFixed(2)} mm). Click again for another measurement.`
+      : `Center-to-center distance: ${primaryDist.toFixed(2)} mm. Click again for another measurement.`;
     this.renderCylinderDimensionVisual(cyl1, cyl2, closest, C1, C2);
     this.emitUpdate();
   }
@@ -3164,7 +3194,7 @@ export class MeasurementTool {
 
       if (selectedItem.kind === 'vertex') {
         this.renderPointMarker(snap.point, COLOR_ITEM1, '1');
-        this.statusPrompt = `Punto 1 fijado en (${snap.point.x.toFixed(1)}, ${snap.point.y.toFixed(1)}, ${snap.point.z.toFixed(1)}). Ahora selecciona el segundo elemento (punto, arista, cara o orificio)...`;
+        this.statusPrompt = `Point 1 locked at (${snap.point.x.toFixed(1)}, ${snap.point.y.toFixed(1)}, ${snap.point.z.toFixed(1)}). Now select the second element (point, edge, face, or hole)...`;
       } else if (selectedItem.kind === 'cylinder') {
         this.selectionGroup.add(this.renderCylinderHighlight(selectedItem.cylData, COLOR_ITEM1, false, '1'));
         this.computeSingleCylinderMeasurement(selectedItem.cylData);
@@ -3173,7 +3203,7 @@ export class MeasurementTool {
         this.computeSingleEdgeMeasurement(selectedItem.edgeData);
       } else if (selectedItem.kind === 'face') {
         this.selectionGroup.add(this.renderCADFaceHighlight(selectedItem.faceData, COLOR_ITEM1, false, '1'));
-        this.statusPrompt = 'Cara 1 fijada. Haz clic en la segunda cara, arista, orificio o punto...';
+        this.statusPrompt = 'Face 1 locked. Click on the second face, edge, hole, or point...';
       }
       this.emitUpdate();
       return;
@@ -3256,19 +3286,19 @@ export class MeasurementTool {
     if (!this.firstSelection) {
       this.firstSelection = snap;
       this.renderPointMarker(snap.point, COLOR_ITEM1, '1');
-      this.statusPrompt = `Punto 1 fijado en (${snap.point.x.toFixed(1)}, ${snap.point.y.toFixed(1)}, ${snap.point.z.toFixed(1)}). Ahora haz clic en el segundo punto...`;
-      console.log('[CAD Measure] Punto 1 locked at:', snap.point);
+      this.statusPrompt = `Point 1 locked at (${snap.point.x.toFixed(1)}, ${snap.point.y.toFixed(1)}, ${snap.point.z.toFixed(1)}). Now click on the second point...`;
+      this.log('Point 1 locked at:', snap.point);
       this.emitUpdate();
     } else {
       const dist = this.firstSelection.point.distanceTo(snap.point);
       if (dist < 0.1) {
-        console.log('[CAD Measure] Clic en el mismo punto que P1 (< 0.1mm). Ignorado.');
+        this.log('Clicked on the same point as P1 (< 0.1mm). Ignored.');
         return;
       }
 
       this.secondSelection = snap;
       this.renderPointMarker(snap.point, COLOR_ITEM2, '2');
-      console.log('[CAD Measure] Punto 2 locked at:', snap.point, 'Distance:', dist);
+      this.log('Point 2 locked at:', snap.point, 'Distance:', dist);
       this.computeDistanceMeasurement(this.firstSelection, this.secondSelection);
     }
   }
@@ -3307,51 +3337,51 @@ export class MeasurementTool {
       const isCoplanar = perpDist < 0.05;
       measurement = {
         type: 'planes',
-        title: isCoplanar ? 'Caras Coplanares' : 'Distancia entre Planos Paralelos',
+        title: isCoplanar ? 'Coplanar Faces' : 'Distance between Parallel Planes',
         distance: perpDist,
         unit: 'mm',
         primaryValue: isCoplanar ? '0.00 mm (Coplanar)' : `${perpDist.toFixed(2)} mm`,
         secondaryValue: isCoplanar
-          ? `Distancia en plano: ${directDist.toFixed(2)} mm | Paralelo (0.0°)`
-          : `Distancia directa 3D: ${directDist.toFixed(2)} mm | Paralelos (0.0°)`,
+          ? `In-plane distance: ${directDist.toFixed(2)} mm | Parallel (0.0°)`
+          : `Direct 3D distance: ${directDist.toFixed(2)} mm | Parallel (0.0°)`,
         details: [
-          { label: 'Espesor / Distancia Perpendicular', value: `${perpDist.toFixed(2)} mm` },
-          { label: 'Distancia Directa 3D', value: `${directDist.toFixed(2)} mm` },
-          { label: 'Relación Geométrica', value: isCoplanar ? 'Coplanares' : 'Paralelas (0.0°)' },
-          { label: 'Componente ΔX', value: `${deltaX.toFixed(2)} mm` },
-          { label: 'Componente ΔY', value: `${deltaY.toFixed(2)} mm` },
-          { label: 'Componente ΔZ', value: `${deltaZ.toFixed(2)} mm` },
-          { label: 'Normal Cara 1', value: `[${n1.x.toFixed(2)}, ${n1.y.toFixed(2)}, ${n1.z.toFixed(2)}]` },
-          { label: 'Normal Cara 2', value: `[${n2.x.toFixed(2)}, ${n2.y.toFixed(2)}, ${n2.z.toFixed(2)}]` },
-          { label: 'Punto Cara 1', value: formatVec3(P1) },
-          { label: 'Punto Cara 2', value: formatVec3(P2) }
+          { label: 'Thickness / Perpendicular Distance', value: `${perpDist.toFixed(2)} mm` },
+          { label: 'Direct 3D Distance', value: `${directDist.toFixed(2)} mm` },
+          { label: 'Geometric Relationship', value: isCoplanar ? 'Coplanar' : 'Parallel (0.0°)' },
+          { label: 'ΔX Component', value: `${deltaX.toFixed(2)} mm` },
+          { label: 'ΔY Component', value: `${deltaY.toFixed(2)} mm` },
+          { label: 'ΔZ Component', value: `${deltaZ.toFixed(2)} mm` },
+          { label: 'Face 1 Normal', value: `[${n1.x.toFixed(2)}, ${n1.y.toFixed(2)}, ${n1.z.toFixed(2)}]` },
+          { label: 'Face 2 Normal', value: `[${n2.x.toFixed(2)}, ${n2.y.toFixed(2)}, ${n2.z.toFixed(2)}]` },
+          { label: 'Face 1 Point', value: formatVec3(P1) },
+          { label: 'Face 2 Point', value: formatVec3(P2) }
         ]
       };
       this.statusPrompt = isCoplanar
-        ? `Caras coplanares (0.00 mm). Distancia en cara: ${directDist.toFixed(2)} mm. Haz clic para otra medición.`
-        : `Espesor perpendicular: ${perpDist.toFixed(2)} mm. Haz clic de nuevo para otra medición.`;
+        ? `Coplanar faces (0.00 mm). In-plane distance: ${directDist.toFixed(2)} mm. Click again for another measurement.`
+        : `Perpendicular thickness: ${perpDist.toFixed(2)} mm. Click again for another measurement.`;
     } else {
       measurement = {
         type: 'planes_angle',
-        title: 'Ángulo entre Caras',
+        title: 'Angle between Faces',
         distance: directDist,
         unit: '°',
         primaryValue: `${acuteAngleDeg.toFixed(1)}°`,
-        secondaryValue: `Distancia 3D entre puntos: ${directDist.toFixed(2)} mm`,
+        secondaryValue: `3D distance between points: ${directDist.toFixed(2)} mm`,
         details: [
-          { label: 'Ángulo Agudo', value: `${acuteAngleDeg.toFixed(1)}°` },
-          { label: 'Ángulo Suplementario', value: `${(180 - acuteAngleDeg).toFixed(1)}°` },
-          { label: 'Distancia Directa 3D', value: `${directDist.toFixed(2)} mm` },
-          { label: 'Componente ΔX', value: `${deltaX.toFixed(2)} mm` },
-          { label: 'Componente ΔY', value: `${deltaY.toFixed(2)} mm` },
-          { label: 'Componente ΔZ', value: `${deltaZ.toFixed(2)} mm` },
-          { label: 'Normal Cara 1', value: `[${n1.x.toFixed(2)}, ${n1.y.toFixed(2)}, ${n1.z.toFixed(2)}]` },
-          { label: 'Normal Cara 2', value: `[${n2.x.toFixed(2)}, ${n2.y.toFixed(2)}, ${n2.z.toFixed(2)}]` },
-          { label: 'Punto Cara 1', value: formatVec3(P1) },
-          { label: 'Punto Cara 2', value: formatVec3(P2) }
+          { label: 'Acute Angle', value: `${acuteAngleDeg.toFixed(1)}°` },
+          { label: 'Supplementary Angle', value: `${(180 - acuteAngleDeg).toFixed(1)}°` },
+          { label: 'Direct 3D Distance', value: `${directDist.toFixed(2)} mm` },
+          { label: 'ΔX Component', value: `${deltaX.toFixed(2)} mm` },
+          { label: 'ΔY Component', value: `${deltaY.toFixed(2)} mm` },
+          { label: 'ΔZ Component', value: `${deltaZ.toFixed(2)} mm` },
+          { label: 'Face 1 Normal', value: `[${n1.x.toFixed(2)}, ${n1.y.toFixed(2)}, ${n1.z.toFixed(2)}]` },
+          { label: 'Face 2 Normal', value: `[${n2.x.toFixed(2)}, ${n2.y.toFixed(2)}, ${n2.z.toFixed(2)}]` },
+          { label: 'Face 1 Point', value: formatVec3(P1) },
+          { label: 'Face 2 Point', value: formatVec3(P2) }
         ]
       };
-      this.statusPrompt = `Ángulo entre caras: ${acuteAngleDeg.toFixed(1)}°. Haz clic de nuevo para otra medición.`;
+      this.statusPrompt = `Angle between faces: ${acuteAngleDeg.toFixed(1)}°. Click again for another measurement.`;
     }
 
     const targetMeshes = [
@@ -3389,28 +3419,28 @@ export class MeasurementTool {
     const plane = (this.viewer && this.viewer.sectionActive) ? this.viewer.sectionPlane : null;
     const centerPoint = this.findVisibleCylinderAnchor(cylData, plane) || cylData.topCenter || cylData.rimCenter || cylData.center || cylData.hitPoint;
     const isArc = !!cylData.isArc;
-    const spanText = (isArc && cylData.spanDeg) ? ` | Arco: ${cylData.spanDeg.toFixed(1)}°` : '';
+    const spanText = (isArc && cylData.spanDeg) ? ` | Arc: ${cylData.spanDeg.toFixed(1)}°` : '';
     const arcBadgeText = `Ø ${cylData.diameter.toFixed(2)} mm (R: ${cylData.radius.toFixed(2)} mm)`;
     this.currentMeasurement = {
       type: 'cylinder_single',
-      title: cylData.label || (isArc ? 'Cilindro / Arco Parcial' : 'Orificio Cilíndrico'),
+      title: cylData.label || (isArc ? 'Cylindrical Arc' : 'Cylindrical Bore'),
       distance: cylData.diameter,
       unit: 'mm',
       primaryValue: arcBadgeText,
-      secondaryValue: `Radio: ${cylData.radius.toFixed(2)} mm${spanText}${cylData.depth > 0.05 ? ` | Profundidad: ${cylData.depth.toFixed(2)} mm` : ''}`,
+      secondaryValue: `Radius: ${cylData.radius.toFixed(2)} mm${spanText}${cylData.depth > 0.05 ? ` | Depth: ${cylData.depth.toFixed(2)} mm` : ''}`,
       targetMeshes: [cylData.mesh].filter(Boolean),
       targetPoints: centerPoint ? [centerPoint.clone()] : [],
       cylData: cylData,
       targetCylinders: [cylData],
       details: [
-        { label: 'Diámetro (Ø)', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
-        { label: 'Radio (R)', value: `${cylData.radius.toFixed(2)} mm` },
-        ...(isArc && cylData.spanDeg ? [{ label: 'Ángulo del Arco', value: `${cylData.spanDeg.toFixed(1)}°` }] : []),
-        { label: 'Profundidad / Longitud', value: cylData.depth > 0.05 ? `${cylData.depth.toFixed(2)} mm` : '0.00 mm (Plano)' },
-        { label: 'Tipo Geométrico', value: cylData.isCutCircle ? 'Círculo de Sección (Corte)' : (isArc ? 'Cilindro / Arco Parcial' : (cylData.isHole ? 'Orificio Interior (Bore/Hole)' : 'Cilindro Exterior (Pin/Shaft)')) },
-        { label: 'Centro 3D (Borde)', value: formatVec3(centerPoint) },
-        { label: 'Eje 3D', value: `[${cylData.axis.x.toFixed(2)}, ${cylData.axis.y.toFixed(2)}, ${cylData.axis.z.toFixed(2)}]` },
-        { label: 'Facetas interpoladas', value: `${cylData.trianglesCount} triángulos` }
+        { label: 'Diameter (Ø)', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
+        { label: 'Radius (R)', value: `${cylData.radius.toFixed(2)} mm` },
+        ...(isArc && cylData.spanDeg ? [{ label: 'Arc Angle', value: `${cylData.spanDeg.toFixed(1)}°` }] : []),
+        { label: 'Depth / Length', value: cylData.depth > 0.05 ? `${cylData.depth.toFixed(2)} mm` : '0.00 mm (Flat)' },
+        { label: 'Geometric Type', value: cylData.isCutCircle ? 'Section Cut Circle' : (isArc ? 'Cylindrical Arc' : (cylData.isHole ? 'Inner Bore / Hole' : 'Outer Cylinder / Shaft')) },
+        { label: '3D Center (Rim)', value: formatVec3(centerPoint) },
+        { label: '3D Axis', value: `[${cylData.axis.x.toFixed(2)}, ${cylData.axis.y.toFixed(2)}, ${cylData.axis.z.toFixed(2)}]` },
+        { label: 'Interpolated facets', value: `${cylData.trianglesCount} triangles` }
       ]
     };
 
@@ -3424,7 +3454,7 @@ export class MeasurementTool {
       visible: false
     }];
 
-    this.statusPrompt = `${cylData.label} 1 fijado (${arcBadgeText}). Haz clic en otro elemento para medir relación...`;
+    this.statusPrompt = `${cylData.label} 1 locked (${arcBadgeText}). Click on another element to measure relationship...`;
     this.emitUpdate();
   }
 
@@ -3440,15 +3470,15 @@ export class MeasurementTool {
     const dir = edgeData.direction;
 
     let orientationText = `Vector [${dir.x.toFixed(2)}, ${dir.y.toFixed(2)}, ${dir.z.toFixed(2)}]`;
-    if (Math.abs(dir.x) > 0.998) orientationText = 'Paralela al Eje X';
-    else if (Math.abs(dir.y) > 0.998) orientationText = 'Paralela al Eje Y';
-    else if (Math.abs(dir.z) > 0.998) orientationText = 'Paralela al Eje Z';
+    if (Math.abs(dir.x) > 0.998) orientationText = 'Parallel to X Axis';
+    else if (Math.abs(dir.y) > 0.998) orientationText = 'Parallel to Y Axis';
+    else if (Math.abs(dir.z) > 0.998) orientationText = 'Parallel to Z Axis';
 
     const isCut = !!edgeData.isCutEdge;
 
     this.currentMeasurement = {
       type: isCut ? 'edge_cut_single' : 'edge_single',
-      title: isCut ? 'Longitud de Arista de Sección / Corte' : 'Longitud de Arista / Línea',
+      title: isCut ? 'Section Cut Edge Length' : 'Edge / Line Length',
       distance: edgeData.length,
       unit: 'mm',
       primaryValue: `${edgeData.length.toFixed(2)} mm`,
@@ -3458,16 +3488,16 @@ export class MeasurementTool {
       targetEdges: [edgeData],
       edgeData: edgeData,
       details: [
-        { label: isCut ? 'Longitud de Arista de Corte' : 'Longitud de Arista', value: `${edgeData.length.toFixed(2)} mm` },
-        { label: 'Tipo de Elemento', value: isCut ? 'Arista de Corte Dinámica (Sección Activa)' : 'Arista CAD' },
-        { label: 'Orientación', value: orientationText },
-        { label: 'Componente ΔX', value: `${deltaX.toFixed(2)} mm` },
-        { label: 'Componente ΔY', value: `${deltaY.toFixed(2)} mm` },
-        { label: 'Componente ΔZ', value: `${deltaZ.toFixed(2)} mm` },
-        { label: 'Punto Inicial (P1)', value: formatVec3(p1) },
-        { label: 'Punto Final (P2)', value: formatVec3(p2) },
-        { label: 'Punto Medio', value: formatVec3(edgeData.midpoint) },
-        { label: 'Vector Director', value: `[${dir.x.toFixed(3)}, ${dir.y.toFixed(3)}, ${dir.z.toFixed(3)}]` }
+        { label: isCut ? 'Section Cut Edge Length' : 'Edge Length', value: `${edgeData.length.toFixed(2)} mm` },
+        { label: 'Element Type', value: isCut ? 'Dynamic Cut Edge (Active Section)' : 'CAD Edge' },
+        { label: 'Orientation', value: orientationText },
+        { label: 'ΔX Component', value: `${deltaX.toFixed(2)} mm` },
+        { label: 'ΔY Component', value: `${deltaY.toFixed(2)} mm` },
+        { label: 'ΔZ Component', value: `${deltaZ.toFixed(2)} mm` },
+        { label: 'Start Point (P1)', value: formatVec3(p1) },
+        { label: 'End Point (P2)', value: formatVec3(p2) },
+        { label: 'Midpoint', value: formatVec3(edgeData.midpoint) },
+        { label: 'Direction Vector', value: `[${dir.x.toFixed(3)}, ${dir.y.toFixed(3)}, ${dir.z.toFixed(3)}]` }
       ]
     };
 
@@ -3482,8 +3512,8 @@ export class MeasurementTool {
     }];
 
     this.statusPrompt = isCut
-      ? `Arista de corte 1 fijada (${edgeData.length.toFixed(2)} mm). Haz clic en otra arista para medir espesor o distancia...`
-      : `Arista 1 fijada (${edgeData.length.toFixed(2)} mm). Haz clic en una segunda arista, cara o punto para medir...`;
+      ? `Cut edge 1 locked (${edgeData.length.toFixed(2)} mm). Click on another edge to measure thickness or distance...`
+      : `Edge 1 locked (${edgeData.length.toFixed(2)} mm). Click on a second edge, face, or point to measure...`;
     this.emitUpdate();
   }
 
@@ -3515,11 +3545,11 @@ export class MeasurementTool {
 
       const segRes = closestPointsBetweenSegments(edge1.p1, edge1.p2, edge2.p1, edge2.p2);
 
-      let title = isCollinear ? 'Aristas Colineales' : 'Distancia entre Aristas Paralelas';
+      let title = isCollinear ? 'Collinear Edges' : 'Distance between Parallel Edges';
       if (bothCut) {
-        title = isCollinear ? 'Aristas de Corte Colineales' : 'Espesor / Distancia entre Aristas de Corte';
+        title = isCollinear ? 'Collinear Cut Edges' : 'Thickness / Distance between Cut Edges';
       } else if (hasCut) {
-        title = isCollinear ? 'Aristas Colineales' : 'Distancia entre Arista y Corte de Sección';
+        title = isCollinear ? 'Collinear Edges' : 'Distance between Edge and Section Cut';
       }
 
       this.currentMeasurement = {
@@ -3527,32 +3557,32 @@ export class MeasurementTool {
         title: title,
         distance: perpDist,
         unit: 'mm',
-        primaryValue: isCollinear ? '0.00 mm (Colineales)' : `${perpDist.toFixed(2)} mm`,
+        primaryValue: isCollinear ? '0.00 mm (Collinear)' : `${perpDist.toFixed(2)} mm`,
         secondaryValue: isCollinear
-          ? `Aristas en la misma línea | Longitudes: ${L1.toFixed(2)} mm y ${L2.toFixed(2)} mm`
-          : `${bothCut ? 'Espesor / separación' : 'Distancia perpendicular'}: ${perpDist.toFixed(2)} mm | Paralelas (0.0°)`,
+          ? `Edges on the same line | Lengths: ${L1.toFixed(2)} mm and ${L2.toFixed(2)} mm`
+          : `${bothCut ? 'Thickness / gap' : 'Perpendicular distance'}: ${perpDist.toFixed(2)} mm | Parallel (0.0°)`,
         targetMeshes: [edge1.mesh, edge2.mesh].filter(Boolean),
         targetPoints: [edge1.midpoint, edge2.midpoint].filter(Boolean),
         targetEdges: [edge1, edge2],
         edge1,
         edge2,
         details: [
-          { label: bothCut ? 'Espesor / Distancia Perpendicular' : 'Distancia Perpendicular', value: `${perpDist.toFixed(2)} mm` },
-          { label: 'Distancia Mínima entre Segmentos', value: `${segRes.dist.toFixed(2)} mm` },
-          { label: 'Relación Geométrica', value: isCollinear ? 'Colineales (Misma línea)' : 'Paralelas (0.0°)' },
-          { label: edge1.isCutEdge ? 'Longitud Arista de Corte 1' : 'Longitud Arista 1', value: `${L1.toFixed(2)} mm` },
-          { label: edge2.isCutEdge ? 'Longitud Arista de Corte 2' : 'Longitud Arista 2', value: `${L2.toFixed(2)} mm` },
-          { label: 'Componente ΔX', value: `${deltaX.toFixed(2)} mm` },
-          { label: 'Componente ΔY', value: `${deltaY.toFixed(2)} mm` },
-          { label: 'Componente ΔZ', value: `${deltaZ.toFixed(2)} mm` },
-          { label: 'Punto Medio Arista 1', value: formatVec3(edge1.midpoint) },
-          { label: 'Punto Medio Arista 2', value: formatVec3(edge2.midpoint) }
+          { label: bothCut ? 'Thickness / Perpendicular Distance' : 'Perpendicular Distance', value: `${perpDist.toFixed(2)} mm` },
+          { label: 'Min Distance between Segments', value: `${segRes.dist.toFixed(2)} mm` },
+          { label: 'Geometric Relationship', value: isCollinear ? 'Collinear (Same line)' : 'Parallel (0.0°)' },
+          { label: edge1.isCutEdge ? 'Cut Edge 1 Length' : 'Edge 1 Length', value: `${L1.toFixed(2)} mm` },
+          { label: edge2.isCutEdge ? 'Cut Edge 2 Length' : 'Edge 2 Length', value: `${L2.toFixed(2)} mm` },
+          { label: 'ΔX Component', value: `${deltaX.toFixed(2)} mm` },
+          { label: 'ΔY Component', value: `${deltaY.toFixed(2)} mm` },
+          { label: 'ΔZ Component', value: `${deltaZ.toFixed(2)} mm` },
+          { label: 'Edge 1 Midpoint', value: formatVec3(edge1.midpoint) },
+          { label: 'Edge 2 Midpoint', value: formatVec3(edge2.midpoint) }
         ]
       };
 
       this.statusPrompt = isCollinear
-        ? `Aristas colineales (0.00 mm). Haz clic para otra medición.`
-        : `${bothCut ? 'Espesor entre cortes' : 'Distancia entre aristas paralelas'}: ${perpDist.toFixed(2)} mm. Haz clic para otra medición.`;
+        ? 'Collinear edges (0.00 mm). Click again for another measurement.'
+        : `${bothCut ? 'Thickness between cuts' : 'Distance between parallel edges'}: ${perpDist.toFixed(2)} mm. Click again for another measurement.`;
 
       this.renderLinesDimensionVisual(edge1, edge2, true, perpDist, segRes.dist, 0);
     } else {
@@ -3564,32 +3594,32 @@ export class MeasurementTool {
 
       this.currentMeasurement = {
         type: 'lines_angle',
-        title: isIntersecting ? 'Ángulo entre Aristas Secantes' : 'Ángulo y Distancia entre Aristas',
+        title: isIntersecting ? 'Angle between Intersecting Edges' : 'Angle and Distance between Edges',
         distance: angleDeg,
         unit: '°',
         primaryValue: `${angleDeg.toFixed(1)}°`,
         secondaryValue: isIntersecting
-          ? `Intersección directa en 3D | Longitudes: ${L1.toFixed(2)} mm y ${L2.toFixed(2)} mm`
-          : `Distancia mínima entre aristas: ${segRes.dist.toFixed(2)} mm`,
+          ? `Direct 3D intersection | Lengths: ${L1.toFixed(2)} mm and ${L2.toFixed(2)} mm`
+          : `Min distance between edges: ${segRes.dist.toFixed(2)} mm`,
         targetMeshes: [edge1.mesh, edge2.mesh].filter(Boolean),
         targetPoints: [edge1.midpoint, edge2.midpoint].filter(Boolean),
         targetEdges: [edge1, edge2],
         edge1,
         edge2,
         details: [
-          { label: 'Ángulo entre Aristas', value: `${angleDeg.toFixed(1)}°` },
-          { label: 'Ángulo Suplementario', value: `${(180 - angleDeg).toFixed(1)}°` },
-          { label: 'Distancia Mínima 3D', value: isIntersecting ? '0.00 mm (Se tocan)' : `${segRes.dist.toFixed(2)} mm` },
-          { label: 'Longitud Arista 1', value: `${L1.toFixed(2)} mm` },
-          { label: 'Longitud Arista 2', value: `${L2.toFixed(2)} mm` },
-          { label: 'Punto más Cercano Arista 1', value: formatVec3(segRes.pt1) },
-          { label: 'Punto más Cercano Arista 2', value: formatVec3(segRes.pt2) }
+          { label: 'Angle between Edges', value: `${angleDeg.toFixed(1)}°` },
+          { label: 'Supplementary Angle', value: `${(180 - angleDeg).toFixed(1)}°` },
+          { label: 'Min 3D Distance', value: isIntersecting ? '0.00 mm (Touching)' : `${segRes.dist.toFixed(2)} mm` },
+          { label: 'Edge 1 Length', value: `${L1.toFixed(2)} mm` },
+          { label: 'Edge 2 Length', value: `${L2.toFixed(2)} mm` },
+          { label: 'Closest Point Edge 1', value: formatVec3(segRes.pt1) },
+          { label: 'Closest Point Edge 2', value: formatVec3(segRes.pt2) }
         ]
       };
 
       this.statusPrompt = isIntersecting
-        ? `Ángulo entre aristas: ${angleDeg.toFixed(1)}°. Haz clic para otra medición.`
-        : `Ángulo: ${angleDeg.toFixed(1)}° (Distancia mín: ${segRes.dist.toFixed(2)} mm). Haz clic para otra medición.`;
+        ? `Angle between edges: ${angleDeg.toFixed(1)}°. Click again for another measurement.`
+        : `Angle: ${angleDeg.toFixed(1)}° (Min distance: ${segRes.dist.toFixed(2)} mm). Click again for another measurement.`;
 
       this.renderLinesDimensionVisual(edge1, edge2, false, 0, segRes.dist, angleDeg);
     }
@@ -3619,11 +3649,11 @@ export class MeasurementTool {
 
       this.currentMeasurement = {
         type: 'line_plane',
-        title: isCoplanar ? 'Arista en la Cara (Coplanar)' : 'Distancia entre Arista y Cara Paralela',
+        title: isCoplanar ? 'Edge on Face (Coplanar)' : 'Distance between Edge and Parallel Face',
         distance: perpDist,
         unit: 'mm',
         primaryValue: isCoplanar ? '0.00 mm (Coplanar)' : `${perpDist.toFixed(2)} mm`,
-        secondaryValue: `Longitud arista: ${edgeData.length.toFixed(2)} mm | Paralela a la cara (0.0°)`,
+        secondaryValue: `Edge length: ${edgeData.length.toFixed(2)} mm | Parallel to face (0.0°)`,
         targetMeshes: [edgeData.mesh, faceData.mesh].filter(Boolean),
         targetPoints: [edgeData.midpoint, P_face].filter(Boolean),
         targetEdges: [edgeData],
@@ -3631,14 +3661,14 @@ export class MeasurementTool {
         edgeData,
         faceData,
         details: [
-          { label: 'Distancia Perpendicular', value: `${perpDist.toFixed(2)} mm` },
-          { label: 'Longitud de Arista', value: `${edgeData.length.toFixed(2)} mm` },
-          { label: 'Relación Geométrica', value: isCoplanar ? 'Arista contenida en el plano' : 'Paralela a la cara' },
-          { label: 'Componente ΔX', value: `${deltaX.toFixed(2)} mm` },
-          { label: 'Componente ΔY', value: `${deltaY.toFixed(2)} mm` },
-          { label: 'Componente ΔZ', value: `${deltaZ.toFixed(2)} mm` },
-          { label: 'Normal de Cara', value: `[${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}]` },
-          { label: 'Punto Medio Arista', value: formatVec3(edgeData.midpoint) }
+          { label: 'Perpendicular Distance', value: `${perpDist.toFixed(2)} mm` },
+          { label: 'Edge Length', value: `${edgeData.length.toFixed(2)} mm` },
+          { label: 'Geometric Relationship', value: isCoplanar ? 'Edge contained in plane' : 'Parallel to face' },
+          { label: 'ΔX Component', value: `${deltaX.toFixed(2)} mm` },
+          { label: 'ΔY Component', value: `${deltaY.toFixed(2)} mm` },
+          { label: 'ΔZ Component', value: `${deltaZ.toFixed(2)} mm` },
+          { label: 'Face Normal', value: `[${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}]` },
+          { label: 'Edge Midpoint', value: formatVec3(edgeData.midpoint) }
         ]
       };
 
@@ -3662,18 +3692,18 @@ export class MeasurementTool {
         visible: false
       }];
 
-      this.statusPrompt = `Distancia perpendicular entre arista y cara: ${perpDist.toFixed(2)} mm. Haz clic para otra medición.`;
+      this.statusPrompt = `Perpendicular distance between edge and face: ${perpDist.toFixed(2)} mm. Click again for another measurement.`;
     } else {
       const angleRad = Math.asin(Math.min(1.0, dot));
       const angleDeg = (angleRad * 180.0) / Math.PI;
 
       this.currentMeasurement = {
         type: 'line_plane_angle',
-        title: 'Ángulo entre Arista y Cara',
+        title: 'Angle between Edge and Face',
         distance: angleDeg,
         unit: '°',
         primaryValue: `${angleDeg.toFixed(1)}°`,
-        secondaryValue: `Longitud arista: ${edgeData.length.toFixed(2)} mm`,
+        secondaryValue: `Edge length: ${edgeData.length.toFixed(2)} mm`,
         targetMeshes: [edgeData.mesh, faceData.mesh].filter(Boolean),
         targetPoints: [edgeData.midpoint, P_face].filter(Boolean),
         targetEdges: [edgeData],
@@ -3681,11 +3711,11 @@ export class MeasurementTool {
         edgeData,
         faceData,
         details: [
-          { label: 'Ángulo con la Superficie', value: `${angleDeg.toFixed(1)}°` },
-          { label: 'Ángulo con la Normal', value: `${(90 - angleDeg).toFixed(1)}°` },
-          { label: 'Longitud de Arista', value: `${edgeData.length.toFixed(2)} mm` },
-          { label: 'Normal de Cara', value: `[${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}]` },
-          { label: 'Punto Medio Arista', value: formatVec3(edgeData.midpoint) }
+          { label: 'Angle with Surface', value: `${angleDeg.toFixed(1)}°` },
+          { label: 'Angle with Normal', value: `${(90 - angleDeg).toFixed(1)}°` },
+          { label: 'Edge Length', value: `${edgeData.length.toFixed(2)} mm` },
+          { label: 'Face Normal', value: `[${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}]` },
+          { label: 'Edge Midpoint', value: formatVec3(edgeData.midpoint) }
         ]
       };
 
@@ -3702,7 +3732,7 @@ export class MeasurementTool {
         visible: false
       }];
 
-      this.statusPrompt = `Ángulo entre arista y cara: ${angleDeg.toFixed(1)}°. Haz clic para otra medición.`;
+      this.statusPrompt = `Angle between edge and face: ${angleDeg.toFixed(1)}°. Click again for another measurement.`;
     }
 
     this.emitUpdate();
@@ -3721,23 +3751,23 @@ export class MeasurementTool {
     const ptMesh = (this.firstSelection?.mesh || this.secondSelection?.mesh);
     this.currentMeasurement = {
       type: 'line_point',
-      title: 'Distancia de Punto a Arista',
+      title: 'Distance from Point to Edge',
       distance: dist,
       unit: 'mm',
       primaryValue: `${dist.toFixed(2)} mm`,
-      secondaryValue: `Longitud arista: ${edgeData.length.toFixed(2)} mm`,
+      secondaryValue: `Edge length: ${edgeData.length.toFixed(2)} mm`,
       targetMeshes: [edgeData.mesh, ptMesh].filter(Boolean),
       targetPoints: [edgeData.midpoint, point].filter(Boolean),
       targetEdges: [edgeData],
       edgeData: edgeData,
       details: [
-        { label: 'Distancia Perpendicular', value: `${dist.toFixed(2)} mm` },
-        { label: 'Longitud de Arista', value: `${edgeData.length.toFixed(2)} mm` },
-        { label: 'Componente ΔX', value: `${deltaX.toFixed(2)} mm` },
-        { label: 'Componente ΔY', value: `${deltaY.toFixed(2)} mm` },
-        { label: 'Componente ΔZ', value: `${deltaZ.toFixed(2)} mm` },
-        { label: 'Punto Proyectado en Arista', value: formatVec3(proj) },
-        { label: 'Punto Seleccionado', value: formatVec3(point) }
+        { label: 'Perpendicular Distance', value: `${dist.toFixed(2)} mm` },
+        { label: 'Edge Length', value: `${edgeData.length.toFixed(2)} mm` },
+        { label: 'ΔX Component', value: `${deltaX.toFixed(2)} mm` },
+        { label: 'ΔY Component', value: `${deltaY.toFixed(2)} mm` },
+        { label: 'ΔZ Component', value: `${deltaZ.toFixed(2)} mm` },
+        { label: 'Projected Point on Edge', value: formatVec3(proj) },
+        { label: 'Selected Point', value: formatVec3(point) }
       ]
     };
 
@@ -3760,7 +3790,7 @@ export class MeasurementTool {
       visible: false
     }];
 
-    this.statusPrompt = `Distancia de punto a arista: ${dist.toFixed(2)} mm. Haz clic para otra medición.`;
+    this.statusPrompt = `Distance from point to edge: ${dist.toFixed(2)} mm. Click again for another measurement.`;
     this.emitUpdate();
   }
 
@@ -3780,11 +3810,11 @@ export class MeasurementTool {
 
     this.currentMeasurement = {
       type: 'line_cylinder',
-      title: isParallel ? 'Distancia entre Arista y Cilindro Paralelo' : 'Distancia y Ángulo entre Arista y Cilindro',
+      title: isParallel ? 'Distance between Edge and Parallel Cylinder' : 'Distance and Angle between Edge and Cylinder',
       distance: axisDist,
       unit: 'mm',
-      primaryValue: `${axisDist.toFixed(2)} mm (al eje)`,
-      secondaryValue: `Distancia a la pared: ${surfDist.toFixed(2)} mm | Ø ${cylData.diameter.toFixed(2)} mm`,
+      primaryValue: `${axisDist.toFixed(2)} mm (to axis)`,
+      secondaryValue: `Distance to wall: ${surfDist.toFixed(2)} mm | Ø ${cylData.diameter.toFixed(2)} mm`,
       targetMeshes: [edgeData.mesh, cylData.mesh].filter(Boolean),
       targetPoints: [edgeData.midpoint, cylData.center || cylData.topCenter].filter(Boolean),
       targetEdges: [edgeData],
@@ -3792,11 +3822,11 @@ export class MeasurementTool {
       edgeData: edgeData,
       cylData: cylData,
       details: [
-        { label: 'Distancia al Eje Cilíndrico', value: `${axisDist.toFixed(2)} mm` },
-        { label: 'Distancia a la Superficie / Pared', value: `${surfDist.toFixed(2)} mm` },
-        { label: 'Diámetro Cilindro', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
-        { label: 'Longitud de Arista', value: `${edgeData.length.toFixed(2)} mm` },
-        { label: 'Relación de Ejes', value: isParallel ? 'Paralelos (0.0°)' : `${((Math.acos(Math.min(1.0, dot)) * 180) / Math.PI).toFixed(1)}°` }
+        { label: 'Distance to Cylinder Axis', value: `${axisDist.toFixed(2)} mm` },
+        { label: 'Distance to Surface / Wall', value: `${surfDist.toFixed(2)} mm` },
+        { label: 'Cylinder Diameter', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
+        { label: 'Edge Length', value: `${edgeData.length.toFixed(2)} mm` },
+        { label: 'Axis Relationship', value: isParallel ? 'Parallel (0.0°)' : `${((Math.acos(Math.min(1.0, dot)) * 180) / Math.PI).toFixed(1)}°` }
       ]
     };
 
@@ -3820,7 +3850,7 @@ export class MeasurementTool {
       visible: false
     }];
 
-    this.statusPrompt = `Distancia entre arista y cilindro: ${axisDist.toFixed(2)} mm. Haz clic para otra medición.`;
+    this.statusPrompt = `Distance between edge and cylinder: ${axisDist.toFixed(2)} mm. Click again for another measurement.`;
     this.emitUpdate();
   }
 
@@ -3845,25 +3875,25 @@ export class MeasurementTool {
     const ptMesh = (this.firstSelection?.mesh || this.secondSelection?.mesh);
     this.currentMeasurement = {
       type: 'point_plane',
-      title: isCoplanar ? 'Punto en el Plano (Coplanar)' : 'Distancia de Punto a Plano',
+      title: isCoplanar ? 'Point on Plane (Coplanar)' : 'Distance from Point to Plane',
       distance: perpDist,
       unit: 'mm',
       primaryValue: isCoplanar ? '0.00 mm (Coplanar)' : `${perpDist.toFixed(2)} mm`,
-      secondaryValue: isCoplanar ? 'El punto está sobre la cara' : `Directa a centro: ${directDist.toFixed(2)} mm`,
+      secondaryValue: isCoplanar ? 'Point is on face' : `Direct to center: ${directDist.toFixed(2)} mm`,
       targetMeshes: [faceData.mesh, ptMesh].filter(Boolean),
       targetPoints: [point, P_face].filter(Boolean),
       targetFaces: [faceData],
       faceData: faceData,
       details: [
-        { label: 'Distancia Perpendicular', value: `${perpDist.toFixed(2)} mm` },
-        { label: 'Distancia Directa al Centro', value: `${directDist.toFixed(2)} mm` },
-        { label: 'Relación Geométrica', value: isCoplanar ? 'Punto contenido en el plano' : 'Punto fuera del plano' },
-        { label: 'Componente ΔX', value: `${deltaX.toFixed(2)} mm` },
-        { label: 'Componente ΔY', value: `${deltaY.toFixed(2)} mm` },
-        { label: 'Componente ΔZ', value: `${deltaZ.toFixed(2)} mm` },
-        { label: 'Punto Seleccionado', value: formatVec3(point) },
-        { label: 'Punto Proyectado en Plano', value: formatVec3(projOnPlane) },
-        { label: 'Normal de Cara', value: `[${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}]` }
+        { label: 'Perpendicular Distance', value: `${perpDist.toFixed(2)} mm` },
+        { label: 'Direct Distance to Center', value: `${directDist.toFixed(2)} mm` },
+        { label: 'Geometric Relationship', value: isCoplanar ? 'Point contained in plane' : 'Point outside plane' },
+        { label: 'ΔX Component', value: `${deltaX.toFixed(2)} mm` },
+        { label: 'ΔY Component', value: `${deltaY.toFixed(2)} mm` },
+        { label: 'ΔZ Component', value: `${deltaZ.toFixed(2)} mm` },
+        { label: 'Selected Point', value: formatVec3(point) },
+        { label: 'Projected Point on Plane', value: formatVec3(projOnPlane) },
+        { label: 'Face Normal', value: `[${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}]` }
       ]
     };
 
@@ -3895,8 +3925,8 @@ export class MeasurementTool {
     }];
 
     this.statusPrompt = isCoplanar
-      ? 'El punto está en el plano. Haz clic para otra medición.'
-      : `Distancia perpendicular al plano: ${perpDist.toFixed(2)} mm. Haz clic para otra medición.`;
+      ? 'Point is on the plane. Click again for another measurement.'
+      : `Perpendicular distance to plane: ${perpDist.toFixed(2)} mm. Click again for another measurement.`;
     this.emitUpdate();
   }
 
@@ -3921,27 +3951,27 @@ export class MeasurementTool {
     const ptMesh = (this.firstSelection?.mesh || this.secondSelection?.mesh);
     this.currentMeasurement = {
       type: 'point_cylinder',
-      title: 'Distancia de Punto a Cilindro / Orificio',
+      title: 'Distance from Point to Cylinder / Bore',
       distance: axisDist,
       unit: 'mm',
-      primaryValue: `${axisDist.toFixed(2)} mm (al eje)`,
-      secondaryValue: `A la pared: ${surfDist.toFixed(2)} mm (${isInside ? 'Interior' : 'Exterior'}) | Ø ${cylData.diameter.toFixed(2)} mm`,
+      primaryValue: `${axisDist.toFixed(2)} mm (to axis)`,
+      secondaryValue: `To wall: ${surfDist.toFixed(2)} mm (${isInside ? 'Inside' : 'Outside'}) | Ø ${cylData.diameter.toFixed(2)} mm`,
       targetMeshes: [cylData.mesh, ptMesh].filter(Boolean),
       targetPoints: [point, cylData.center || cylData.topCenter].filter(Boolean),
       targetCylinders: [cylData],
       cylData: cylData,
       details: [
-        { label: 'Distancia Perpendicular al Eje', value: `${axisDist.toFixed(2)} mm` },
-        { label: 'Distancia a la Superficie / Pared', value: `${surfDist.toFixed(2)} mm` },
-        { label: 'Posición Relativa', value: isInside ? 'Interior del cilindro' : 'Exterior del cilindro' },
-        { label: 'Diámetro Cilindro', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
-        { label: 'Radio Cilindro', value: `${cylData.radius.toFixed(2)} mm` },
-        { label: 'Componente ΔX', value: `${deltaX.toFixed(2)} mm` },
-        { label: 'Componente ΔY', value: `${deltaY.toFixed(2)} mm` },
-        { label: 'Componente ΔZ', value: `${deltaZ.toFixed(2)} mm` },
-        { label: 'Punto Seleccionado', value: formatVec3(point) },
-        { label: 'Punto Proyectado en Eje', value: formatVec3(projOnAxis) },
-        { label: 'Centro 3D Cilindro', value: formatVec3(C) }
+        { label: 'Perpendicular Distance to Axis', value: `${axisDist.toFixed(2)} mm` },
+        { label: 'Distance to Surface / Wall', value: `${surfDist.toFixed(2)} mm` },
+        { label: 'Relative Position', value: isInside ? 'Inside cylinder' : 'Outside cylinder' },
+        { label: 'Cylinder Diameter', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
+        { label: 'Cylinder Radius', value: `${cylData.radius.toFixed(2)} mm` },
+        { label: 'ΔX Component', value: `${deltaX.toFixed(2)} mm` },
+        { label: 'ΔY Component', value: `${deltaY.toFixed(2)} mm` },
+        { label: 'ΔZ Component', value: `${deltaZ.toFixed(2)} mm` },
+        { label: 'Selected Point', value: formatVec3(point) },
+        { label: 'Projected Point on Axis', value: formatVec3(projOnAxis) },
+        { label: '3D Cylinder Center', value: formatVec3(C) }
       ]
     };
 
@@ -3972,7 +4002,7 @@ export class MeasurementTool {
       visible: false
     }];
 
-    this.statusPrompt = `Distancia de punto a eje: ${axisDist.toFixed(2)} mm (pared: ${surfDist.toFixed(2)} mm). Haz clic para otra medición.`;
+    this.statusPrompt = `Point to axis distance: ${axisDist.toFixed(2)} mm (wall: ${surfDist.toFixed(2)} mm). Click again for another measurement.`;
     this.emitUpdate();
   }
 
@@ -3996,11 +4026,11 @@ export class MeasurementTool {
 
       this.currentMeasurement = {
         type: 'plane_cylinder_distance',
-        title: 'Distancia entre Eje Cilíndrico y Cara Paralela',
+        title: 'Distance between Cylinder Axis and Parallel Face',
         distance: axisDist,
         unit: 'mm',
-        primaryValue: `${axisDist.toFixed(2)} mm (al eje)`,
-        secondaryValue: `Pared a cara: ${wallDist.toFixed(2)} mm | Ø ${cylData.diameter.toFixed(2)} mm | Eje paralelo (0.0°)`,
+        primaryValue: `${axisDist.toFixed(2)} mm (to axis)`,
+        secondaryValue: `Wall to face: ${wallDist.toFixed(2)} mm | Ø ${cylData.diameter.toFixed(2)} mm | Parallel axis (0.0°)`,
         targetMeshes: [faceData.mesh, cylData.mesh].filter(Boolean),
         targetPoints: [P_face, cylData.center || cylData.topCenter].filter(Boolean),
         targetFaces: [faceData],
@@ -4008,14 +4038,14 @@ export class MeasurementTool {
         faceData: faceData,
         cylData: cylData,
         details: [
-          { label: 'Distancia Eje a Cara', value: `${axisDist.toFixed(2)} mm` },
-          { label: 'Espesor Mínimo (Pared a Cara)', value: `${wallDist.toFixed(2)} mm` },
-          { label: 'Diámetro Cilindro', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
-          { label: 'Radio Cilindro', value: `${cylData.radius.toFixed(2)} mm` },
-          { label: 'Relación Geométrica', value: 'Eje cilíndrico paralelo a la cara (0.0°)' },
-          { label: 'Normal de Cara', value: `[${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}]` },
-          { label: 'Eje Cilíndrico', value: `[${a.x.toFixed(2)}, ${a.y.toFixed(2)}, ${a.z.toFixed(2)}]` },
-          { label: 'Centro Cilindro', value: formatVec3(cylData.center) }
+          { label: 'Axis to Face Distance', value: `${axisDist.toFixed(2)} mm` },
+          { label: 'Min Thickness (Wall to Face)', value: `${wallDist.toFixed(2)} mm` },
+          { label: 'Cylinder Diameter', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
+          { label: 'Cylinder Radius', value: `${cylData.radius.toFixed(2)} mm` },
+          { label: 'Geometric Relationship', value: 'Cylinder axis parallel to face (0.0°)' },
+          { label: 'Face Normal', value: `[${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}]` },
+          { label: 'Cylinder Axis', value: `[${a.x.toFixed(2)}, ${a.y.toFixed(2)}, ${a.z.toFixed(2)}]` },
+          { label: 'Cylinder Center', value: formatVec3(cylData.center) }
         ]
       };
 
@@ -4038,7 +4068,7 @@ export class MeasurementTool {
         visible: false
       }];
 
-      this.statusPrompt = `Distancia eje-cara: ${axisDist.toFixed(2)} mm (pared: ${wallDist.toFixed(2)} mm). Haz clic para otra medición.`;
+      this.statusPrompt = `Axis-face distance: ${axisDist.toFixed(2)} mm (wall: ${wallDist.toFixed(2)} mm). Click again for another measurement.`;
     } else {
       const elevationRad = Math.asin(Math.min(1.0, dot));
       const angleDeg = (elevationRad * 180.0) / Math.PI;
@@ -4046,11 +4076,11 @@ export class MeasurementTool {
 
       this.currentMeasurement = {
         type: 'plane_cylinder_angle',
-        title: isPerp ? 'Cilindro Perpendicular a la Cara (90°)' : 'Ángulo entre Cilindro y Cara',
+        title: isPerp ? 'Cylinder Perpendicular to Face (90°)' : 'Angle between Cylinder and Face',
         distance: angleDeg,
         unit: '°',
         primaryValue: isPerp ? '90.0° (Perpendicular)' : `${angleDeg.toFixed(1)}°`,
-        secondaryValue: `Ø ${cylData.diameter.toFixed(2)} mm | Ángulo con la normal: ${(90 - angleDeg).toFixed(1)}°`,
+        secondaryValue: `Ø ${cylData.diameter.toFixed(2)} mm | Angle with normal: ${(90 - angleDeg).toFixed(1)}°`,
         targetMeshes: [faceData.mesh, cylData.mesh].filter(Boolean),
         targetPoints: [P_face, cylData.center || cylData.topCenter].filter(Boolean),
         targetFaces: [faceData],
@@ -4058,12 +4088,12 @@ export class MeasurementTool {
         faceData: faceData,
         cylData: cylData,
         details: [
-          { label: 'Ángulo con la Superficie', value: `${angleDeg.toFixed(1)}°` },
-          { label: 'Ángulo con la Normal', value: `${(90 - angleDeg).toFixed(1)}°` },
-          { label: 'Relación Geométrica', value: isPerp ? 'Eje perpendicular a la cara (orificio pasante)' : 'Eje inclinado respecto a la cara' },
-          { label: 'Diámetro Cilindro', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
-          { label: 'Normal de Cara', value: `[${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}]` },
-          { label: 'Centro Cilindro', value: formatVec3(cylData.center) }
+          { label: 'Angle with Surface', value: `${angleDeg.toFixed(1)}°` },
+          { label: 'Angle with Normal', value: `${(90 - angleDeg).toFixed(1)}°` },
+          { label: 'Geometric Relationship', value: isPerp ? 'Axis perpendicular to face (through hole)' : 'Axis inclined relative to face' },
+          { label: 'Cylinder Diameter', value: `Ø ${cylData.diameter.toFixed(2)} mm` },
+          { label: 'Face Normal', value: `[${n.x.toFixed(2)}, ${n.y.toFixed(2)}, ${n.z.toFixed(2)}]` },
+          { label: 'Cylinder Center', value: formatVec3(cylData.center) }
         ]
       };
 
@@ -4079,7 +4109,7 @@ export class MeasurementTool {
         visible: false
       }];
 
-      this.statusPrompt = `Ángulo cilindro-cara: ${angleDeg.toFixed(1)}°. Haz clic para otra medición.`;
+      this.statusPrompt = `Cylinder-face angle: ${angleDeg.toFixed(1)}°. Click again for another measurement.`;
     }
 
     this.emitUpdate();
@@ -4170,7 +4200,7 @@ export class MeasurementTool {
         this.badges = [{
           id: 'measure-main',
           worldPos: edge1.midpoint.clone(),
-          text: `Colineales (0.00 mm)`,
+          text: `Collinear (0.00 mm)`,
           targetEdges: [edge1, edge2],
           screenX: 0,
           screenY: 0,
@@ -4264,7 +4294,7 @@ export class MeasurementTool {
 
     const measurement = {
       type: 'distance',
-      title: 'Distancia 3D (Punto a Punto)',
+      title: '3D Distance (Point to Point)',
       distance: directDistance,
       deltaX, deltaY, deltaZ,
       unit: 'mm',
@@ -4273,17 +4303,17 @@ export class MeasurementTool {
       targetMeshes,
       targetPoints,
       details: [
-        { label: 'Distancia Total 3D', value: `${directDistance.toFixed(2)} mm` },
-        { label: 'Componente ΔX (Ancho)', value: `${deltaX.toFixed(2)} mm` },
-        { label: 'Componente ΔY (Profundidad)', value: `${deltaY.toFixed(2)} mm` },
-        { label: 'Componente ΔZ (Altura)', value: `${deltaZ.toFixed(2)} mm` },
-        { label: 'Punto 1', value: formatVec3(P1) },
-        { label: 'Punto 2', value: formatVec3(P2) }
+        { label: 'Total 3D Distance', value: `${directDistance.toFixed(2)} mm` },
+        { label: 'ΔX Component (Width)', value: `${deltaX.toFixed(2)} mm` },
+        { label: 'ΔY Component (Depth)', value: `${deltaY.toFixed(2)} mm` },
+        { label: 'ΔZ Component (Height)', value: `${deltaZ.toFixed(2)} mm` },
+        { label: 'Point 1', value: formatVec3(P1) },
+        { label: 'Point 2', value: formatVec3(P2) }
       ]
     };
 
     this.currentMeasurement = measurement;
-    this.statusPrompt = `Medición: ${directDistance.toFixed(2)} mm. Haz clic de nuevo para otra medición.`;
+    this.statusPrompt = `Measurement: ${directDistance.toFixed(2)} mm. Click again for another measurement.`;
     this.renderDimensionLine(P1, P2, `${directDistance.toFixed(2)} mm`);
     this.emitUpdate();
   }
@@ -4331,8 +4361,8 @@ export class MeasurementTool {
       const hoverGroup = this.renderCylinderHighlight(targetCutCircle, hoverColor, true);
       this.hoverGroup.add(hoverGroup);
       this.statusPrompt = !this.firstSelection
-        ? `Círculo de corte detectado (Ø ${targetCutCircle.diameter.toFixed(2)} mm). Clic para fijar como Elemento 1`
-        : `Círculo de corte detectado (Ø ${targetCutCircle.diameter.toFixed(2)} mm). Clic para fijar como Elemento 2`;
+        ? `Section cut circle detected (Ø ${targetCutCircle.diameter.toFixed(2)} mm). Click to lock as Item 1`
+        : `Section cut circle detected (Ø ${targetCutCircle.diameter.toFixed(2)} mm). Click to lock as Item 2`;
       this.emitUpdate();
       return;
     }
@@ -5179,7 +5209,7 @@ export class MeasurementTool {
 
   /**
    * Prominent visual CAD straight edge / line highlight:
-   * Volumetric cylindrical 3D rod along the arista with spherical end caps.
+   * Volumetric cylindrical 3D rod along the edge with spherical end caps.
    * Dynamically adapts to camera distance (zoom) and object size (edge length).
    */
   renderCADEdgeHighlight(edgeData, colorHex, isHover = false, stepNumber = '1') {
@@ -5942,4 +5972,16 @@ export class MeasurementTool {
       });
     }
   }
+}
+
+// Global debug helper for browser console
+if (typeof window !== 'undefined') {
+  window.enableCADDebug = (enabled = true) => {
+    window.__CAD_DEBUG__ = enabled;
+    try {
+      localStorage.setItem('cad_debug', enabled ? 'true' : 'false');
+    } catch (_) {}
+    console.log(`[CAD Measure] Debug logging ${enabled ? 'ENABLED' : 'DISABLED'}`);
+    return enabled;
+  };
 }
