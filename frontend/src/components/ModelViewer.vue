@@ -233,7 +233,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
         @pointerdown="startDragBadge($event, badge)"
         @dblclick.stop="resetBadgeOffset(badge)"
         @wheel="handleBadgeWheel($event)"
-        title="Arrastra para mover la etiqueta y despejar la vista. Doble clic para centrar."
+        title="Drag to reposition badge and clear the view. Double-click to reset."
       >
         <v-chip
           :color="badge.isSaved ? 'info' : 'primary'"
@@ -268,7 +268,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       variant="elevated"
       elevation="4"
       size="small"
-      class="persistent-cotas-pill font-weight-medium"
+      class="persistent-dims-pill font-weight-medium"
       style="position: absolute; bottom: 84px; left: 24px; z-index: 10; backdrop-filter: blur(8px);"
     >
       <v-icon start size="small">mdi-ruler</v-icon>

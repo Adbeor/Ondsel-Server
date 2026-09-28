@@ -479,7 +479,7 @@ export class Viewer {
           this.controls.enablePan = false;
           event.preventDefault(); // Stop Linux / browser Alt window menu
         } else if (event.shiftKey) {
-          // Shift + Drag => Pan (Desplazar)
+          // Shift + Drag => Pan
           // In OrbitControls: when mouseButtons.LEFT === ROTATE and shiftKey is true, it triggers PAN!
           this.controls.mouseButtons.LEFT = THREE.MOUSE.ROTATE;
           this.controls.enableRotate = true;
@@ -783,7 +783,7 @@ export class Viewer {
       const isAlt = this.isAltDown || event.altKey;
 
       if (isShift && !isAlt) {
-        // Shift + Pointer Movement => PAN (Desplazar)
+        // Shift + Pointer Movement => PAN
         this.panCamera(dx, dy);
         if (!this._isNavigating) {
           this._isNavigating = true;
@@ -1288,7 +1288,7 @@ export class Viewer {
     const colorHex = color ? '#' + color.getHexString() : '#cccccc';
 
     return {
-      name: modelObject.name || 'Pieza CAD',
+      name: modelObject.name || 'CAD Part',
       realName: modelObject.realName || '',
       uuid: modelObject.uuid,
       type: modelObject.GetType ? modelObject.GetType() : (modelObject.type || 'Shape'),
@@ -2215,7 +2215,7 @@ export class Viewer {
   }
 
   /**
-   * Calculates and returns all 3D cut perimeter edges (aristas de corte/sección)
+   * Calculates and returns all 3D cut perimeter edges (section cut edges)
    * produced dynamically where the cutting plane intersects the visible 3D meshes.
    * Results are cached until the section plane offset, axis, or inversion changes.
    */
@@ -2497,7 +2497,7 @@ export class Viewer {
               type: 'circle',
               isCutCircle: true,
               isHole: false,
-              label: isClosed ? 'Círculo de Sección (Corte)' : 'Arco de Sección (Corte)',
+              label: isClosed ? 'Section Cut Circle' : 'Section Cut Arc',
               mesh: mesh,
               radius: fit.r,
               diameter: fit.r * 2,

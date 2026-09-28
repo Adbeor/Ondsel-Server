@@ -7,8 +7,8 @@ import * as THREE from 'three';
 export const COLOR_ITEM1 = 0x00b4d8; // Technical CAD Cyan (crisp, pleasant, non-glare)
 export const COLOR_ITEM2 = 0xf59e0b; // Precision Amber
 export const COLOR_ACCENT = 0xeab308; // Technical Gold
-export const COLOR_DIMENSION_LIGHT = 0x111827; // Deep dark charcoal / black for light theme cotas
-export const COLOR_DIMENSION_DARK = 0xffffff;  // Crisp pure white for dark theme cotas
+export const COLOR_DIMENSION_LIGHT = 0x111827; // Deep dark charcoal / black for light theme dimensions
+export const COLOR_DIMENSION_DARK = 0xffffff;  // Crisp pure white for dark theme dimensions
 
 /**
  * Distance from point P to line segment A -> B.
@@ -2412,7 +2412,7 @@ export class MeasurementTool {
   }
 
   /**
-   * Dynamically scales a CAD highlight/cota mesh (rod cylinder or marker sphere)
+   * Dynamically scales a CAD highlight/dimension mesh (rod cylinder or marker sphere)
    * so that it retains an optimal, clean pixel thickness on screen and never
    * overpowers small features or swallows short edges.
    */
@@ -2798,7 +2798,7 @@ export class MeasurementTool {
    * Main selection dispatcher
    */
   processSelection(snap) {
-    // If a measurement was already complete, automatically commit it to persistent cotas so it stays visible!
+    // If a measurement was already complete, automatically commit it to persistent dimensions so it stays visible!
     if (this.secondSelection || (this.mode !== 'radius' && this.currentMeasurement && !this.firstSelection) || (this.mode === 'radius' && this.currentMeasurement && this.secondSelection)) {
       this.commitCurrentMeasurement();
     }
@@ -3107,7 +3107,7 @@ export class MeasurementTool {
    * - Cylinders / Holes / Circular Rims
    * - Straight Lines / Edges (CAD crease boundaries, cut edges)
    * - Planar Faces
-   * Supports all 10 pairwise combinations with CAD cotas and full dimension details.
+   * Supports all 10 pairwise combinations with CAD dimensions and full measurement details.
    */
   processSmartSelection(snap) {
     let selectedItem = null;
@@ -4980,7 +4980,7 @@ export class MeasurementTool {
       this.updateAdaptiveMesh(m2);
 
       badgePos = mid;
-      badgeText = `Holgura: ${radialClearance.toFixed(2)} mm (ΔØ ${deltaDia.toFixed(2)} mm)`;
+      badgeText = `Clearance: ${radialClearance.toFixed(2)} mm (ΔØ ${deltaDia.toFixed(2)} mm)`;
     } else {
       const dist = C1.distanceTo(C2);
       const mid = new THREE.Vector3().addVectors(C1, C2).multiplyScalar(0.5);
@@ -5026,7 +5026,7 @@ export class MeasurementTool {
       this.updateAdaptiveMesh(m2);
 
       if (isNested) {
-        badgeText = `Holgura: ${Math.max(0, radialClearance).toFixed(2)} mm | Ejes: ${axisDist.toFixed(2)} mm`;
+        badgeText = `Clearance: ${Math.max(0, radialClearance).toFixed(2)} mm | Axes: ${axisDist.toFixed(2)} mm`;
       }
     }
 
@@ -5674,8 +5674,8 @@ export class MeasurementTool {
 
   /**
    * Evaluates whether a measurement should be visible on screen based on:
-   * 1. Visibility of measured objects in the scene/tree (if a part is hidden or isolated-out, hide the cota)
-   * 2. Section cut clipping plane (if points are in the cut-away/removed part, hide the cota)
+   * 1. Visibility of measured objects in the scene/tree (if a part is hidden or isolated-out, hide the dimension)
+   * 2. Section cut clipping plane (if points are in the cut-away/removed part, hide the dimension)
    */
   isMeasurementVisible(entry) {
     if (!entry) return true;

@@ -23,7 +23,7 @@ SPDX-License-Identifier: AGPL-3.0-or-later
       <v-btn
         :icon="isItemVisible(item) ? 'mdi-eye-outline' : 'mdi-eye-off-outline'"
         :color="isItemVisible(item) ? undefined : 'grey'"
-        :title="isItemVisible(item) ? 'Ocultar pieza (Espacio)' : 'Mostrar pieza (Espacio)'"
+        :title="isItemVisible(item) ? 'Hide part (Space)' : 'Show part (Space)'"
         variant="text"
         flat
         @click.stop="toggleVisibility(item)"
